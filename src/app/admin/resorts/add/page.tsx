@@ -27,6 +27,9 @@ export default function AdminResortsAddPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "disabled">("all");
   const [editRow, setEditRow] = useState<Resort | null>(null);
   const [editPw, setEditPw] = useState("");
+  const [editPw2, setEditPw2] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ type: 'toggle' | 'delete'; row: Resort } | null>(null);
   const [page, setPage] = useState(1);
   const pageSize = 5;
@@ -131,12 +134,28 @@ export default function AdminResortsAddPage() {
   };
 
   const onEditOpen = (row: Resort) => {
-    setEditRow(row);
+    setEditRow({ ...row });
     setEditPw("");
+    setEditPw2("");
+    setEditSaving(false);
+    setEditError(null);
   };
   const onEditSave = async () => {
     if (!editRow) return;
     try {
+      setEditSaving(true);
+      setEditError(null);
+      const emailValid = /.+@.+\..+/.test(editRow.email);
+      if (!editRow.resortName.trim() || !emailValid) {
+        setEditError(!editRow.resortName.trim() ? 'Resort name is required' : 'Invalid email');
+        setEditSaving(false);
+        return;
+      }
+      if ((editPw || editPw2) && editPw !== editPw2) {
+        setEditError('Passwords do not match');
+        setEditSaving(false);
+        return;
+      }
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       const patch: any = { id: editRow.id, resortName: editRow.resortName, email: editRow.email };
       if (editPw) patch.password = editPw;
@@ -149,9 +168,19 @@ export default function AdminResortsAddPage() {
       if (res.ok && !data?.error) {
         setEditRow(null);
         setEditPw("");
+        setEditPw2("");
         loadResorts();
+      } else {
+        const msg = Array.isArray(data?.message)
+          ? data.message.join(', ')
+          : (typeof data?.message === 'string' ? data.message : (data?.error || 'Bad Request'));
+        setEditError(msg);
       }
-    } catch {}
+    } catch (e: any) {
+      setEditError(e?.message || "Request failed");
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "-");
@@ -345,20 +374,25 @@ export default function AdminResortsAddPage() {
             <div className="mt-4 space-y-3">
               <div>
                 <label className="block text-sm text-slate-700">Resort Name</label>
-                <input value={editRow.resortName} onChange={(e) => setEditRow({ ...editRow, resortName: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
+                <input value={editRow.resortName} onChange={(e) => setEditRow((prev) => (prev ? { ...prev, resortName: e.target.value } : prev))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
               </div>
               <div>
                 <label className="block text-sm text-slate-700">Email</label>
-                <input value={editRow.email} onChange={(e) => setEditRow({ ...editRow, email: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
+                <input value={editRow.email} onChange={(e) => setEditRow((prev) => (prev ? { ...prev, email: e.target.value } : prev))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
               </div>
               <div>
                 <label className="block text-sm text-slate-700">New Password (optional)</label>
-                <input value={editPw} onChange={(e) => setEditPw(e.target.value)} placeholder="Leave blank to keep current" className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
+                <input type="password" value={editPw} onChange={(e) => setEditPw(e.target.value)} placeholder="Leave blank to keep current" className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-700">Confirm New Password</label>
+                <input type="password" value={editPw2} onChange={(e) => setEditPw2(e.target.value)} placeholder="Re-enter new password" className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
               </div>
             </div>
+            {editError && <p className="mt-3 text-sm text-rose-600">{editError}</p>}
             <div className="mt-5 flex gap-3">
-              <button onClick={onEditSave} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Save</button>
-              <button onClick={() => setEditRow(null)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cancel</button>
+              <button onClick={onEditSave} disabled={editSaving} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60">{editSaving ? 'Saving...' : 'Save'}</button>
+              <button onClick={() => setEditRow(null)} disabled={editSaving} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60">Cancel</button>
             </div>
           </div>
         </div>
@@ -395,3 +429,4 @@ export default function AdminResortsAddPage() {
     </div>
   );
 }
+

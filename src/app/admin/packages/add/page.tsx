@@ -32,14 +32,35 @@ export default function AdminPackagesAddPage() {
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "sold">("active");
   const [rows, setRows] = useState<PackageAccount[]>([]);
   const [loading, setLoading] = useState(false);
+  const [counts, setCounts] = useState<{ '1h': number; '3h': number; '1d': number }>({ '1h': 0, '3h': 0, '1d': 0 });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editEmail, setEditEmail] = useState("");
   const [editPassword, setEditPassword] = useState("");
+  const [confirmDisable, setConfirmDisable] = useState<PackageAccount | null>(null);
+  const [editModal, setEditModal] = useState<PackageAccount | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const limit = 5;
 
   const pkgLabel = (id: PkgId) => (id === "1h" ? "1 Hour" : id === "3h" ? "3 Hours" : "1 Day");
+
+  const fetchCounts = async () => {
+    try {
+      const ids: PkgId[] = ["1h", "3h", "1d"];
+      const result: any = { '1h': 0, '3h': 0, '1d': 0 };
+      for (const id of ids) {
+        const url = new URL(`${API_BASE}/package-accounts`);
+        url.searchParams.set("pkg", id);
+        url.searchParams.set("status", "active");
+        url.searchParams.set("limit", "1");
+        const res = await fetch(url.toString(), { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+        const data = await res.json();
+        const total = typeof data?.total === 'number' ? data.total : (Array.isArray(data?.data) ? data.data.length : 0);
+        result[id] = total;
+      }
+      setCounts(result);
+    } catch {}
+  };
 
   const fetchAccounts = async () => {
     setLoading(true);
@@ -67,6 +88,7 @@ export default function AdminPackagesAddPage() {
 
   useEffect(() => {
     fetchAccounts();
+    fetchCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterPkg, filterStatus, token, page]);
 
@@ -106,6 +128,7 @@ export default function AdminPackagesAddPage() {
         setLines("");
         setPage(1);
         fetchAccounts();
+        fetchCounts();
       }
     } catch {
       setAddMsg("Failed to add accounts");
@@ -135,12 +158,14 @@ export default function AdminPackagesAddPage() {
     setEditingId(row.id);
     setEditEmail(row.email);
     setEditPassword(row.password);
+    setEditModal(row);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditEmail("");
     setEditPassword("");
+    setEditModal(null);
   };
 
   const saveEdit = async (row: PackageAccount) => {
@@ -168,6 +193,18 @@ export default function AdminPackagesAddPage() {
         <h1 className="text-xl font-semibold text-slate-900">Add Package Accounts</h1>
         <p className="mt-1 text-sm text-slate-600">Add credentials for the three fixed packages below. Each line is one account: email,password</p>
 
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          {[{id:'1h',price:50000,label:'1 Hour'},{id:'3h',price:100000,label:'3 Hours'},{id:'1d',price:200000,label:'1 Day'}].map((c:any) => (
+            <div key={c.id} className={`rounded-xl border p-4 ring-1 ring-slate-200 ${pkg===c.id? 'bg-sky-50 border-sky-200' : 'bg-white'}`}>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium text-slate-900">{c.label}</div>
+                <span className="text-xs text-slate-500">Active: <span className="font-semibold text-slate-900">{counts[c.id as PkgId] || 0}</span></span>
+              </div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">{new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(c.price)}</div>
+            </div>
+          ))}
+        </div>
+
         <form onSubmit={onAdd} className="mt-5 grid gap-4 sm:grid-cols-3">
           <div>
             <Label htmlFor="pkg" requiredMark>Package</Label>
@@ -187,12 +224,12 @@ export default function AdminPackagesAddPage() {
               placeholder={"email1@example.com,password1\nemail2@example.com,password2"}
               className="h-32 w-full rounded-md border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500 text-slate-900 placeholder:text-slate-400"
             />
-            <div className="mt-1 text-xs text-slate-700">Format: email,password (comma or whitespace separated)</div>
+            <div className="mt-1 text-xs text-slate-700">Format: email,password (comma or whitespace separated) · {lines.trim()? lines.split(/\r?\n/).filter(l=>l.trim()).length : 0} line(s)</div>
           </div>
 
           <div className="sm:col-span-3 flex items-center gap-2">
-            <Button type="submit" loading={adding}>Add Accounts</Button>
-            {addMsg && <div className="text-sm text-slate-600">{addMsg}</div>}
+            <Button type="submit" loading={adding} className="bg-slate-900 hover:bg-slate-950">Add Accounts</Button>
+            {addMsg && <div className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">{addMsg}</div>}
           </div>
         </form>
       </section>
@@ -250,24 +287,28 @@ export default function AdminPackagesAddPage() {
                       {r.status === 'active' ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td className="px-3 py-2 align-top">
-                    {editingId === r.id ? (
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <Input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="New password" />
-                        <div className="flex gap-2">
-                          <Button onClick={() => saveEdit(r)} className="px-3 py-1">Save</Button>
-                          <Button variant="secondary" onClick={cancelEdit} className="px-3 py-1">Cancel</Button>
-                        </div>
-                      </div>
-                    ) : (
+                   <td className="px-3 py-2 align-top">
                       <div className="flex gap-2">
-                        <Button variant={r.status === "active" ? "danger" : "secondary"} onClick={() => onToggleStatus(r)} className="px-3 py-1">
-                          {r.status === "active" ? "Disable" : "Enable"}
+                        {r.status === 'active' ? (
+                          <Button
+                            variant="secondary"
+                            onClick={() => setConfirmDisable(r)}
+                            className="px-3 py-1 bg-gradient-to-b from-white to-rose-50 border border-rose-200 text-rose-700 ring-1 ring-rose-200 hover:to-rose-100"
+                          >
+                            Disable
+                          </Button>
+                        ) : (
+                          <Button variant="secondary" onClick={() => onToggleStatus(r)} className="px-3 py-1">Enable</Button>
+                        )}
+                        <Button
+                          variant="secondary"
+                          onClick={() => startEdit(r)}
+                          className="px-3 py-1 bg-gradient-to-b from-white to-rose-50 border border-rose-200 text-rose-700 ring-1 ring-rose-200 hover:to-rose-100"
+                        >
+                          Edit
                         </Button>
-                        <Button variant="secondary" onClick={() => startEdit(r)} className="px-3 py-1">Edit</Button>
                       </div>
-                    )}
-                  </td>
+                   </td>
                 </tr>
               ))}
               {!loading && rows.length === 0 && (
@@ -313,6 +354,53 @@ export default function AdminPackagesAddPage() {
           </div>
         </div>
       </section>
+      {/* Disable confirm modal */}
+      {confirmDisable && (
+        <div className="fixed inset-0 z-50 grid place-items-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmDisable(null)} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200 text-slate-900">
+            <h3 className="text-lg font-semibold text-slate-900">Disable Account?</h3>
+            <p className="mt-2 text-sm text-slate-700">This account will become inactive and cannot be used for new orders.</p>
+            <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-800 ring-1 ring-slate-200">
+              <div className="font-mono text-slate-900">{confirmDisable.email}</div>
+              <div className="text-slate-700">Package: {pkgLabel(confirmDisable.pkg)}</div>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <Button
+                onClick={async () => { await onToggleStatus(confirmDisable); setConfirmDisable(null); }}
+                className="h-11 flex-1 bg-sky-100 text-sky-900 border border-sky-300 ring-1 ring-sky-300 hover:bg-sky-200"
+              >
+                Yes, disable
+              </Button>
+              <Button variant="secondary" onClick={() => setConfirmDisable(null)} className="h-11 flex-1 bg-rose-50 text-rose-800 border border-rose-300 ring-1 ring-rose-200 hover:bg-rose-100">Cancel</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center">
+          <div className="absolute inset-0 bg-black/40" onClick={cancelEdit} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200 text-slate-900">
+            <h3 className="text-lg font-semibold text-slate-900">Edit Account</h3>
+            <div className="mt-4 space-y-3">
+              <div>
+                <Label className="text-slate-800">Email</Label>
+                <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-slate-800">New Password (optional)</Label>
+                <Input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="Leave blank to keep current" />
+              </div>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <Button onClick={() => saveEdit(editModal)} className="h-11 flex-1 bg-sky-100 text-sky-900 border border-sky-300 ring-1 ring-sky-300 hover:bg-sky-200">Save</Button>
+              <Button variant="secondary" onClick={cancelEdit} className="h-11 flex-1 bg-rose-50 text-rose-800 border border-rose-300 ring-1 ring-rose-200 hover:bg-rose-100">Cancel</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

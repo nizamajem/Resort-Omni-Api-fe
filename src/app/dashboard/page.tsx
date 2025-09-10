@@ -35,12 +35,42 @@ export default function DashboardPage() {
     return "http://localhost:4000/api";
   }, []);
 
+  // Auth info (token + resort name)
+  const [token, setToken] = useState<string | null>(null);
+  const [resortName, setResortName] = useState<string>("");
+
+  // Prefer localStorage token; fallback to cookie if present
+  const readToken = () => {
+    try {
+      const ls = localStorage.getItem("token");
+      if (ls && ls.trim()) return ls;
+      const m = typeof document !== 'undefined' ? document.cookie.match(/(?:^|; )token=([^;]+)/) : null;
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    try {
+      setToken(readToken());
+      const raw = localStorage.getItem("auth");
+      const auth = raw ? JSON.parse(raw) : null;
+      setResortName(auth?.resortName || "");
+    } catch {}
+
+    const onStorage = () => setToken(readToken());
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   // Fetch availability of active accounts per package
   useEffect(() => {
     const run = async () => {
       try {
         const res = await fetch(`${API_BASE}/orders/availability`, {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          credentials: 'include',
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -55,17 +85,7 @@ export default function DashboardPage() {
     return (availability[id] || 0) > 0;
   };
 
-  // Auth info (token + resort name)
-  const [token, setToken] = useState<string | null>(null);
-  const [resortName, setResortName] = useState<string>("");
-  useEffect(() => {
-    try {
-      setToken(localStorage.getItem("token"));
-      const raw = localStorage.getItem("auth");
-      const auth = raw ? JSON.parse(raw) : null;
-      setResortName(auth?.resortName || "");
-    } catch {}
-  }, []);
+  
 
   const fmt = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 
@@ -87,6 +107,7 @@ export default function DashboardPage() {
       const res = await fetch(`${API_BASE}/orders/cash`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        credentials: 'include',
         body: JSON.stringify({
           pkg: orderFor.id,
           packageName: orderFor.title,
@@ -338,6 +359,7 @@ export default function DashboardPage() {
               const res = await fetch(`${API_BASE}/payments/complete`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                credentials: 'include',
                 body: JSON.stringify({
                   orderId: lastOrderId || `ORDER-${orderFor.id}-${Date.now()}`,
                   pkg: orderFor.id,
@@ -408,6 +430,11 @@ export default function DashboardPage() {
           <div className="rounded-xl bg-white px-6 py-4 shadow ring-1 ring-slate-200">
             <div className="flex items-center gap-3 text-sm text-slate-700"><span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" /> Processing...</div>
           </div>
+        </div>
+      )}
+      {!token && (
+        <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-amber-800 ring-1 ring-amber-200">
+          You are not signed in. Please log in to place orders.
         </div>
       )}
     </div>
