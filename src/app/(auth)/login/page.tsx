@@ -61,7 +61,7 @@ export default function LoginPage() {
         if (resortName) document.cookie = `resortName=${encodeURIComponent(resortName)}; Path=/; Max-Age=${60 * 60 * 24 * 7}`;
       } catch {}
       const next = searchParams?.get("next") || "";
-      const defaultPath = role === "superadmin" ? "/history" : "/dashboard";
+      const defaultPath = "/dashboard";
       const allowed = role === "superadmin" ? true : !next.startsWith("/admin");
       router.replace(allowed && next ? next : defaultPath);
     } catch (err) {

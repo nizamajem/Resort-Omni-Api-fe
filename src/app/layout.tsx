@@ -29,7 +29,7 @@ export default function RootLayout({
 }>) {
   const cookieStore = cookies();
   const role = cookieStore.get("role")?.value || "";
-  const showSidebar = Boolean(role);
+  const showSidebar = role === "superadmin";
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased text-gray-900 bg-gradient-to-b from-sky-50 to-slate-50`}>
