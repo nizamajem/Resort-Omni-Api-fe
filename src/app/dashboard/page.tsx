@@ -135,7 +135,8 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200 shadow-sm">
+      <section className="rounded-2xl bg-gradient-to-tr from-sky-50 to-emerald-50 p-[1px] shadow-sm">
+        <div className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200">
         <div className="flex items-center gap-3">
           <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z"/></svg>
@@ -145,11 +146,12 @@ export default function DashboardPage() {
             <p className="text-sm text-slate-600">Choose a package and complete checkout with cash or online payment.</p>
           </div>
         </div>
+        </div>
       </section>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {packages.map((p) => (
-          <article key={p.id} className="group rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 transition hover:shadow-md">
+          <article key={p.id} className="group rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 transition hover:shadow-md hover:-translate-y-0.5">
             <div className="flex items-start justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">{p.title}</h2>
@@ -163,9 +165,12 @@ export default function DashboardPage() {
               <div className="text-2xl font-bold text-slate-900">{fmt(p.price)}</div>
               <div className="text-sm text-slate-500">/ {p.unit}</div>
             </div>
+            <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Includes {fmt(p.price)} Reflow balance
+            </div>
             <div className="mt-6 flex gap-3">
               <button onClick={() => onDetail(p)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Detail</button>
-              <button onClick={() => onOrder(p)} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Order</button>
+              <button onClick={() => onOrder(p)} className="h-11 flex-1 rounded-xl bg-sky-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-600">Order</button>
             </div>
           </article>
         ))}
@@ -253,6 +258,20 @@ export default function DashboardPage() {
           <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">Confirm Online Payment</h3>
             <p className="mt-2 text-sm text-slate-600">You can pay using ShopeePay, QRIS, GoPay, or Dana via Midtrans (Sandbox).</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              <span className="inline-flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 font-medium text-orange-700 ring-1 ring-orange-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" /> ShopeePay
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700 ring-1 ring-slate-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-500" /> QRIS
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700 ring-1 ring-sky-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-sky-500" /> GoPay
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 font-medium text-indigo-700 ring-1 ring-indigo-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" /> Dana
+              </span>
+            </div>
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200">
               <div className="flex items-center justify-between">
                 <span className="text-slate-600">Package</span>
