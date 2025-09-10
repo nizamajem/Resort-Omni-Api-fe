@@ -22,12 +22,13 @@ export const metadata: Metadata = {
 // Mark this layout as dynamic because it reads cookies() at render-time
 export const dynamic = "force-dynamic";
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cookieStore = cookies();
+  // cookies() must be awaited in Next 15
+  const cookieStore = await cookies();
   const role = cookieStore.get("role")?.value || "";
   const showSidebar = role === "superadmin";
   return (

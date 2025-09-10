@@ -7,12 +7,16 @@ const MIDTRANS_PROD_BASE = "https://app.midtrans.com";
 export async function POST(req: NextRequest) {
   try {
     const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
-    const serverKey = process.env.MIDTRANS_SERVER_KEY;
+    const serverKey =
+      process.env.MIDTRANS_SERVER_KEY ||
+      (isProduction ? process.env.MIDTRANS_SERVER_KEY_PRODUCTION : process.env.MIDTRANS_SERVER_KEY_SANDBOX);
     if (!serverKey) {
       return Response.json({ error: "Missing MIDTRANS_SERVER_KEY in env" }, { status: 500 });
     }
 
-    const baseUrl = isProduction ? MIDTRANS_PROD_BASE : MIDTRANS_SANDBOX_BASE;
+    const baseUrl = isProduction
+      ? process.env.MIDTRANS_BASE_URL_PRODUCTION || MIDTRANS_PROD_BASE
+      : process.env.MIDTRANS_BASE_URL_SANDBOX || MIDTRANS_SANDBOX_BASE;
     const url = `${baseUrl}/snap/v1/transactions`;
 
     const body = await req.json();

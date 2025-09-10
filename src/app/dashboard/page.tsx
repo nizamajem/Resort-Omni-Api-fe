@@ -279,7 +279,7 @@ export default function DashboardPage() {
             <p className="mt-1 text-sm text-slate-600">{orderFor.title} • {fmt(orderFor.price)} / {orderFor.unit}</p>
             <div className="mt-4 grid gap-3">
               <button onClick={() => { setMethodChoiceOpen(false); setConfirmCashOpen(true); }} className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cash (Pay on site)</button>
-              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-700">Online payment available: QRIS/VA/CC (Midtrans Sandbox)</div>
+              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-700">Online payment available: QRIS/VA/CC ({process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === 'true' ? 'Midtrans Production' : 'Midtrans Sandbox'})</div>
               <button onClick={() => { setMethodChoiceOpen(false); setConfirmOnlineOpen(true); }} className="h-11 w-full rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Online Payment</button>
             </div>
           </div>
@@ -310,7 +310,7 @@ export default function DashboardPage() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmOnlineOpen(false)} />
           <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">Confirm Online Payment</h3>
-            <p className="mt-2 text-sm text-slate-600">You can pay using ShopeePay, QRIS, GoPay, or Dana via Midtrans (Sandbox).</p>
+            <p className="mt-2 text-sm text-slate-600">You can pay using ShopeePay, QRIS, GoPay, or Dana via {process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === 'true' ? 'Midtrans (Production)' : 'Midtrans (Sandbox)'}.</p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
               <span className="inline-flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 font-medium text-orange-700 ring-1 ring-orange-200">
                 <span className="h-1.5 w-1.5 rounded-full bg-orange-500" /> ShopeePay
