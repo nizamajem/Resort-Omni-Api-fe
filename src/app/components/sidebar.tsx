@@ -28,7 +28,7 @@ export default function Sidebar() {
     { href: "/admin/resorts/add", label: "Add Resort", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.118a7.5 7.5 0 0 1 15 0A17.933 17.933 0 0 1 12 21.75c-2.68 0-5.216-.586-7.5-1.632Z"/></svg>
     ), show: role === "superadmin" },
-    { href: "/admin/packages/add", label: "Add Package", icon: (
+    { href: "/admin/packages/add", label: "Packages", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.375 7.5 12 12.75 20.625 7.5M12 21.75l-8.625-5.25V7.5L12 2.25l8.625 5.25v9L12 21.75Z"/></svg>
     ), show: role === "superadmin" },
     { href: "/history", label: "History", icon: (

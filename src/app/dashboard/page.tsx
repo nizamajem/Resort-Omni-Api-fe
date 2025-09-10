@@ -26,6 +26,7 @@ export default function DashboardPage() {
   const [resultMsg, setResultMsg] = useState<string | null>(null);
   const [lastOrderId, setLastOrderId] = useState<string | null>(null);
   const [cred, setCred] = useState<{ email: string; password: string } | null>(null);
+  const [availability, setAvailability] = useState<{ '1h': number; '3h': number; '1d': number } | null>(null);
 
   // Backend base URL
   const API_BASE = useMemo(() => {
@@ -33,6 +34,26 @@ export default function DashboardPage() {
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     return "http://localhost:4000/api";
   }, []);
+
+  // Fetch availability of active accounts per package
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/orders/availability`, {
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && typeof data === 'object') setAvailability(data);
+      } catch {}
+    };
+    run();
+  }, [API_BASE, token]);
+
+  const canOrder = (id: Pkg["id"]) => {
+    if (!availability) return true; // optimistic until fetched
+    return (availability[id] || 0) > 0;
+  };
 
   // Auth info (token + resort name)
   const [token, setToken] = useState<string | null>(null);
@@ -170,7 +191,18 @@ export default function DashboardPage() {
             </div>
             <div className="mt-6 flex gap-3">
               <button onClick={() => onDetail(p)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Detail</button>
-              <button onClick={() => onOrder(p)} className="h-11 flex-1 rounded-xl bg-sky-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-600">Order</button>
+              <button
+                onClick={() => onOrder(p)}
+                disabled={!canOrder(p.id)}
+                className={`h-11 flex-1 rounded-xl px-4 text-sm font-medium shadow-sm transition ${
+                  canOrder(p.id)
+                    ? "bg-sky-500 text-white hover:bg-sky-600"
+                    : "bg-slate-200 text-slate-500 cursor-not-allowed"
+                }`}
+                title={canOrder(p.id) ? "Order" : "Unavailable: no active account"}
+              >
+                {canOrder(p.id) ? "Order" : "Unavailable"}
+              </button>
             </div>
           </article>
         ))}

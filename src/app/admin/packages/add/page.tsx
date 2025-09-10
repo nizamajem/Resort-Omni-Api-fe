@@ -1,312 +1,317 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Label } from "@/app/components/ui/label";
+import { Select } from "@/app/components/ui/select";
+import { Button } from "@/app/components/ui/button";
+import { Input } from "@/app/components/ui/input";
 
-type DurationType = "HOUR" | "DAY";
+type PkgId = "1h" | "3h" | "1d";
+type PackageAccount = { id: string; pkg: PkgId; email: string; password: string; status: "active" | "sold"; createdAt?: string };
 
-type Pkg = {
-  id: string;              // id final dari backend
-  name: string;
-  durationType: DurationType;
-  durationValue: number;
-  price: number;
-  isActive: boolean;
-  _optimistic?: boolean;   // penanda lokal (tidak dikirim ke API)
-};
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-
-async function createPackageAPI(input: Omit<Pkg, "id" | "_optimistic">) {
-  const res = await fetch(`${API_URL}/packages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // tambahkan Authorization Bearer <token> jika perlu
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const msg = await safeText(res);
-    throw new Error(msg || `Create package failed (${res.status})`);
-  }
-  const data = await res.json();
-  // diasumsikan API mengembalikan { id, name, durationType, durationValue, price, isActive }
-  return data as Pkg;
-}
-
-async function togglePackageAPI(id: string, isActive: boolean) {
-  const res = await fetch(`${API_URL}/packages/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ isActive }),
-  });
-  if (!res.ok) {
-    const msg = await safeText(res);
-    throw new Error(msg || `Toggle package failed (${res.status})`);
-  }
-}
-
-async function deletePackageAPI(id: string) {
-  const res = await fetch(`${API_URL}/packages/${id}`, { method: "DELETE" });
-  if (!res.ok) {
-    const msg = await safeText(res);
-    throw new Error(msg || `Delete package failed (${res.status})`);
-  }
-}
-
-async function safeText(res: Response) {
-  try {
-    return await res.text();
-  } catch {
-    return "";
-  }
-}
+const API_BASE = (() => {
+  const env = process.env.NEXT_PUBLIC_API_URL;
+  if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
+  return "http://localhost:4000/api";
+})();
 
 export default function AdminPackagesAddPage() {
-  // form state
-  const [name, setName] = useState("");
-  const [durationType, setDurationType] = useState<DurationType>("HOUR");
-  const [durationValue, setDurationValue] = useState(1);
-  const [price, setPrice] = useState(50_000);
-  const [isActive, setIsActive] = useState(true);
-
-  // table rows (dummy awal)
-  const [rows, setRows] = useState<Pkg[]>([
-    { id: "1h", name: "1 Hour", durationType: "HOUR", durationValue: 1, price: 50_000, isActive: true },
-    { id: "3h", name: "3 Hours", durationType: "HOUR", durationValue: 3, price: 100_000, isActive: true },
-    { id: "1d", name: "1 Day", durationType: "DAY", durationValue: 1, price: 200_000, isActive: true },
-  ]);
-
-  // utils
-  const fmt = useMemo(
-    () => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }),
-    []
-  );
-  const fmtIDR = (n: number) => fmt.format(n);
-
-  const resetForm = useCallback(() => {
-    setName("");
-    setDurationType("HOUR");
-    setDurationValue(1);
-    setPrice(50_000);
-    setIsActive(true);
+  const [token, setToken] = useState<string | null>(null);
+  useEffect(() => {
+    try { setToken(localStorage.getItem("token")); } catch {}
   }, []);
 
-  // ---------- CREATE (optimistic) ----------
-  const onAdd = useCallback(
-    async (e: React.FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
+  // Add form state
+  const [pkg, setPkg] = useState<PkgId>("1h");
+  const [lines, setLines] = useState<string>("");
+  const [adding, setAdding] = useState(false);
+  const [addMsg, setAddMsg] = useState<string | null>(null);
 
-      const trimmed = name.trim();
-      if (!trimmed) return;
-      if (!Number.isFinite(durationValue) || durationValue <= 0) return;
-      if (!Number.isFinite(price) || price < 0) return;
+  // Accounts list state
+  const [filterPkg, setFilterPkg] = useState<"all" | PkgId>("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "sold">("active");
+  const [rows, setRows] = useState<PackageAccount[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 5;
 
-      // 1) optimistic insert (id sementara)
-      const tempId = `temp_${Date.now()}`;
-      const optimisticRow: Pkg = {
-        id: tempId,
-        name: trimmed,
-        durationType,
-        durationValue,
-        price: Math.round(price),
-        isActive,
-        _optimistic: true,
-      };
-      setRows((prev) => [optimisticRow, ...prev]);
+  const pkgLabel = (id: PkgId) => (id === "1h" ? "1 Hour" : id === "3h" ? "3 Hours" : "1 Day");
 
-      try {
-        // 2) call API
-        const created = await createPackageAPI({
-          name: trimmed,
-          durationType,
-          durationValue,
-          price: Math.round(price),
-          isActive,
-        });
-
-        // 3) commit: ganti row temp dengan row dari server (id final)
-        setRows((prev) =>
-          prev.map((r) => (r.id === tempId ? { ...created, _optimistic: false } : r))
-        );
-
-        resetForm();
-      } catch (err: any) {
-        // 4) rollback
-        setRows((prev) => prev.filter((r) => r.id !== tempId));
-        window.alert(err?.message || "Gagal membuat paket.");
-      }
-    },
-    [name, durationType, durationValue, price, isActive, resetForm]
-  );
-
-  // ---------- TOGGLE ACTIVE (optimistic, opsional) ----------
-  const toggle = useCallback(async (id: string) => {
-    const target = rows.find((r) => r.id === id);
-    if (!target) return;
-
-    // optimistic toggle
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: !r.isActive } : r)));
-
+  const fetchAccounts = async () => {
+    setLoading(true);
     try {
-      // kalau id masih temp (belum tersimpan di server), cukup update lokal
-      if (!target.id.startsWith("temp_")) {
-        await togglePackageAPI(id, !target.isActive);
-      }
-    } catch (err: any) {
-      // rollback
-      setRows((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: target.isActive } : r)));
-      window.alert(err?.message || "Gagal mengubah status paket.");
+      const url = new URL(`${API_BASE}/package-accounts`);
+      if (filterStatus !== "all") url.searchParams.set("status", filterStatus);
+      if (filterPkg !== "all") url.searchParams.set("pkg", filterPkg);
+      url.searchParams.set("offset", String((page - 1) * limit));
+      url.searchParams.set("limit", String(limit));
+      const res = await fetch(url.toString(), {
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await res.json();
+      const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+      const tot = typeof data?.total === 'number' ? data.total : list.length;
+      setRows(list as PackageAccount[]);
+      setTotal(tot);
+    } catch {
+      setRows([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
     }
-  }, [rows]);
+  };
 
-  // ---------- DELETE (optimistic, opsional) ----------
-  const remove = useCallback(async (id: string) => {
-    const before = rows;
-    // optimistic remove
-    setRows((prev) => prev.filter((r) => r.id !== id));
+  useEffect(() => {
+    fetchAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterPkg, filterStatus, token, page]);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filterPkg, filterStatus]);
+
+  const onAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddMsg(null);
+    const items = lines
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const [email, password] = l.split(/,|\s+/).map((x) => x.trim());
+        return { email, password };
+      })
+      .filter((x) => x.email && x.password);
+    if (items.length === 0) {
+      setAddMsg("Please provide at least one line: email,password");
+      return;
+    }
+    setAdding(true);
     try {
-      if (!id.startsWith("temp_")) {
-        await deletePackageAPI(id);
+      const res = await fetch(`${API_BASE}/package-accounts/batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ pkg, items }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        setAddMsg(data?.error || "Failed to add accounts");
+      } else {
+        setAddMsg(`Inserted ${data?.inserted || items.length} account(s)`);
+        setLines("");
+        setPage(1);
+        fetchAccounts();
       }
-    } catch (err: any) {
-      // rollback
-      setRows(before);
-      window.alert(err?.message || "Gagal menghapus paket.");
+    } catch {
+      setAddMsg("Failed to add accounts");
+    } finally {
+      setAdding(false);
     }
-  }, [rows]);
+  };
 
-  // input handlers anti-NaN
-  const onDurationChange = useCallback((v: string) => {
-    const n = Number(v);
-    setDurationValue(Number.isFinite(n) && n > 0 ? Math.floor(n) : 1);
-  }, []);
+  const onToggleStatus = async (row: PackageAccount) => {
+    const next = row.status === "active" ? "sold" : "active";
+    try {
+      const res = await fetch(`${API_BASE}/package-accounts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ id: row.id, status: next }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) throw new Error(data?.error || "Failed");
+      // Refresh to keep pagination/total accurate
+      fetchAccounts();
+    } catch {
+      // noop error UI for now
+    }
+  };
 
-  const onPriceChange = useCallback((v: string) => {
-    const n = Number(v);
-    setPrice(Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0);
-  }, []);
+  const startEdit = (row: PackageAccount) => {
+    setEditingId(row.id);
+    setEditEmail(row.email);
+    setEditPassword(row.password);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditEmail("");
+    setEditPassword("");
+  };
+
+  const saveEdit = async (row: PackageAccount) => {
+    try {
+      const res = await fetch(`${API_BASE}/package-accounts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ id: row.id, email: editEmail, password: editPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) throw new Error(data?.error || "Failed");
+      // Refresh to reflect changes
+      fetchAccounts();
+      cancelEdit();
+    } catch {
+      // noop error UI for now
+    }
+  };
+
+  const fmtDate = useMemo(() => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }), []);
 
   return (
     <main className="space-y-6 p-6">
-      <section className="rounded-xl border bg-white p-4">
-        <h1 className="text-xl font-semibold text-slate-900">Add Package</h1>
-        <p className="mt-1 text-sm text-slate-600">Create or manage available packages.</p>
+      <section className="rounded-xl border bg-white p-5 shadow-sm">
+        <h1 className="text-xl font-semibold text-slate-900">Add Package Accounts</h1>
+        <p className="mt-1 text-sm text-slate-600">Add credentials for the three fixed packages below. Each line is one account: email,password</p>
 
-        <form onSubmit={onAdd} className="mt-4 grid gap-3 sm:grid-cols-3">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name (e.g. 1 Hour)"
-            className="rounded border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500"
-            aria-label="Package name"
-          />
+        <form onSubmit={onAdd} className="mt-5 grid gap-4 sm:grid-cols-3">
+          <div>
+            <Label htmlFor="pkg" requiredMark>Package</Label>
+            <Select id="pkg" value={pkg} onChange={(e) => setPkg(e.target.value as PkgId)}>
+              <option value="1h">1 Hour (IDR 50,000)</option>
+              <option value="3h">3 Hours (IDR 100,000)</option>
+              <option value="1d">1 Day (IDR 200,000)</option>
+            </Select>
+          </div>
 
-          <select
-            value={durationType}
-            onChange={(e) => setDurationType(e.target.value as DurationType)}
-            className="rounded border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500"
-            aria-label="Duration type"
-          >
-            <option value="HOUR">HOUR</option>
-            <option value="DAY">DAY</option>
-          </select>
-
-          <input
-            type="number"
-            min={1}
-            inputMode="numeric"
-            value={durationValue}
-            onChange={(e) => onDurationChange(e.target.value)}
-            className="rounded border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500"
-            placeholder="Duration value"
-            aria-label="Duration value"
-          />
-
-          <input
-            type="number"
-            min={0}
-            inputMode="numeric"
-            value={price}
-            onChange={(e) => onPriceChange(e.target.value)}
-            className="rounded border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500"
-            placeholder="Price (IDR)"
-            aria-label="Price"
-          />
-
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="h-4 w-4"
+          <div className="sm:col-span-2">
+            <Label htmlFor="lines" requiredMark className="text-slate-900">Accounts (one per line)</Label>
+            <textarea
+              id="lines"
+              value={lines}
+              onChange={(e) => setLines(e.target.value)}
+              placeholder={"email1@example.com,password1\nemail2@example.com,password2"}
+              className="h-32 w-full rounded-md border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500 text-slate-900 placeholder:text-slate-400"
             />
-            Active
-          </label>
+            <div className="mt-1 text-xs text-slate-700">Format: email,password (comma or whitespace separated)</div>
+          </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              className="rounded bg-sky-600 px-4 py-2 text-white hover:bg-sky-700 active:scale-[0.99]"
-            >
-              Add
-            </button>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="rounded border px-4 py-2 hover:bg-slate-50"
-            >
-              Reset
-            </button>
+          <div className="sm:col-span-3 flex items-center gap-2">
+            <Button type="submit" loading={adding}>Add Accounts</Button>
+            {addMsg && <div className="text-sm text-slate-600">{addMsg}</div>}
           </div>
         </form>
       </section>
 
-      <section className="overflow-x-auto rounded-xl border bg-white">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Duration</th>
-              <th className="px-3 py-2">Price</th>
-              <th className="px-3 py-2">Active</th>
-              <th className="px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t">
-                <td className="px-3 py-2">{r.name}</td>
-                <td className="px-3 py-2">
-                  {r.durationValue} {r.durationType}
-                </td>
-                <td className="px-3 py-2">{fmtIDR(r.price)}</td>
-                <td className="px-3 py-2">{r.isActive ? "Yes" : "No"}</td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => toggle(r.id)}
-                      className="rounded border px-3 py-1 text-xs hover:bg-slate-50"
-                    >
-                      {r.isActive ? "Disable" : "Activate"}
-                    </button>
-                    <button
-                      onClick={() => remove(r.id)}
-                      className="rounded border px-3 py-1 text-xs text-rose-700 hover:bg-rose-50"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
+      <section className="rounded-xl border bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Accounts</h2>
+            <p className="text-xs text-slate-700">Manage credentials used to fulfill orders.</p>
+          </div>
+          <div className="flex gap-2">
+            <div className="min-w-[160px]">
+              <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="sold">Disabled</option>
+              </Select>
+            </div>
+            <div className="min-w-[180px]">
+              <Select value={filterPkg} onChange={(e) => setFilterPkg(e.target.value as any)}>
+                <option value="all">All Packages</option>
+                <option value="1h">1 Hour</option>
+                <option value="3h">3 Hours</option>
+                <option value="1d">1 Day</option>
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-700">
               <tr>
-                <td colSpan={5} className="px-3 py-4 text-center text-slate-500">
-                  No data
-                </td>
+                <th className="px-3 py-2 font-medium">Email</th>
+                <th className="px-3 py-2 font-medium">Package</th>
+                <th className="px-3 py-2 font-medium">Added</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t">
+                  <td className="px-3 py-2 align-top">
+                    {editingId === r.id ? (
+                      <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="text-slate-900" />
+                    ) : (
+                      <span className="font-mono text-slate-900">{r.email}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-slate-900 align-top">{pkgLabel(r.pkg)}</td>
+                  <td className="px-3 py-2 text-slate-800 align-top">{r.createdAt ? fmtDate.format(new Date(r.createdAt)) : "-"}</td>
+                  <td className="px-3 py-2 align-top">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${r.status === 'active' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-slate-50 text-slate-700 ring-slate-300'}`}>
+                      {r.status === 'active' ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 align-top">
+                    {editingId === r.id ? (
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="New password" />
+                        <div className="flex gap-2">
+                          <Button onClick={() => saveEdit(r)} className="px-3 py-1">Save</Button>
+                          <Button variant="secondary" onClick={cancelEdit} className="px-3 py-1">Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Button variant={r.status === "active" ? "danger" : "secondary"} onClick={() => onToggleStatus(r)} className="px-3 py-1">
+                          {r.status === "active" ? "Disable" : "Enable"}
+                        </Button>
+                        <Button variant="secondary" onClick={() => startEdit(r)} className="px-3 py-1">Edit</Button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-500">No accounts</td>
+                </tr>
+              )}
+              {loading && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-500">Loading...</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div className="flex items-center justify-between gap-3 px-2 py-3 text-sm text-slate-700">
+            <div>
+              {total > 0 ? (
+                <span>
+                  Showing {Math.min((page - 1) * limit + 1, total)}–{Math.min(page * limit, total)} of {total}
+                </span>
+              ) : (
+                <span>Showing 0–0 of 0</span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1"
+              >
+                Prev
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={page * limit >= total}
+                onClick={() => setPage((p) => (p * limit >= total ? p : p + 1))}
+                className="px-3 py-1"
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   );
