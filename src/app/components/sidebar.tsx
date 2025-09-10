@@ -15,6 +15,11 @@ export default function Sidebar() {
     } catch {}
   }, []);
 
+  // Hide sidebar on login/auth pages regardless of role
+  if (pathname && pathname.startsWith("/login")) {
+    return null;
+  }
+
   const links = [
     { href: "/dashboard", label: "Dashboard", show: true },
     { href: "/history", label: "History", show: true },
