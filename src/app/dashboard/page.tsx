@@ -18,6 +18,7 @@ export default function DashboardPage() {
   const [detailFor, setDetailFor] = useState<Pkg | null>(null);
   const [orderFor, setOrderFor] = useState<Pkg | null>(null);
   const [methodChoiceOpen, setMethodChoiceOpen] = useState(false);
+  const [confirmOnlineOpen, setConfirmOnlineOpen] = useState(false);
   const [confirmCashOpen, setConfirmCashOpen] = useState(false);
   const [snapToken, setSnapToken] = useState<string | null>(null);
   const [snapOpen, setSnapOpen] = useState(false);
@@ -95,6 +96,7 @@ export default function DashboardPage() {
   const orderOnline = async () => {
     if (!orderFor) return;
     setMethodChoiceOpen(false);
+    setConfirmOnlineOpen(false);
     setProcessing(true);
     try {
       const orderId = `ORDER-${orderFor.id}-${Date.now()}`;
@@ -108,13 +110,22 @@ export default function DashboardPage() {
         credit_card: { secure: true },
       };
       const res = await fetch("/api/midtrans/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapReq) });
-      const data = await res.json();
-      if (!res.ok || !data?.token) {
-        setResultMsg("Online payment initialization failed.");
-      } else {
-        setSnapToken(data.token);
-        setSnapOpen(true);
+      const text = await res.text();
+      if (!res.ok) {
+        // Show server error details from route for easier debugging
+        let detail = "";
+        try { const j = JSON.parse(text); detail = typeof j?.error === 'string' ? j.error : text; } catch { detail = text; }
+        setResultMsg(`Online payment initialization failed. ${detail ? `\nDetail: ${detail}` : ''}`.trim());
+        return;
       }
+      let data: any = null;
+      try { data = JSON.parse(text); } catch {}
+      if (!data?.token) {
+        setResultMsg("Online payment initialization failed. Detail: Missing token from server.");
+        return;
+      }
+      setSnapToken(data.token);
+      setSnapOpen(true);
     } catch {
       setResultMsg("Online payment initialization failed.");
     } finally {
@@ -211,7 +222,7 @@ export default function DashboardPage() {
             <div className="mt-4 grid gap-3">
               <button onClick={() => { setMethodChoiceOpen(false); setConfirmCashOpen(true); }} className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cash (Pay on site)</button>
               <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-700">Online payment available: QRIS/VA/CC (Midtrans Sandbox)</div>
-              <button onClick={orderOnline} className="h-11 w-full rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Online Payment</button>
+              <button onClick={() => { setMethodChoiceOpen(false); setConfirmOnlineOpen(true); }} className="h-11 w-full rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Online Payment</button>
             </div>
           </div>
         </div>
@@ -230,6 +241,36 @@ export default function DashboardPage() {
             <div className="mt-5 flex gap-3">
               <button onClick={orderCash} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Yes, proceed</button>
               <button onClick={() => setConfirmCashOpen(false)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Online modal */}
+      {orderFor && confirmOnlineOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmOnlineOpen(false)} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <h3 className="text-lg font-semibold text-slate-900">Confirm Online Payment</h3>
+            <p className="mt-2 text-sm text-slate-600">You can pay using ShopeePay, QRIS, GoPay, or Dana via Midtrans (Sandbox).</p>
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Package</span>
+                <span className="font-medium text-slate-900">{orderFor.title}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-slate-600">Duration</span>
+                <span className="font-medium text-slate-900">{orderFor.unit}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-slate-600">Amount</span>
+                <span className="font-semibold text-slate-900">{fmt(orderFor.price)}</span>
+              </div>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">You will be redirected to the Midtrans Snap popup to complete payment securely.</div>
+            <div className="mt-5 flex gap-3">
+              <button onClick={() => { setConfirmOnlineOpen(false); orderOnline(); }} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Yes, continue</button>
+              <button onClick={() => setConfirmOnlineOpen(false)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cancel</button>
             </div>
           </div>
         </div>

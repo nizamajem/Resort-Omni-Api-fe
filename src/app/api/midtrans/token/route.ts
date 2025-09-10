@@ -9,16 +9,18 @@ export async function POST(req: NextRequest) {
     const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
     const serverKey = process.env.MIDTRANS_SERVER_KEY;
     if (!serverKey) {
-      return Response.json(
-        { error: "Missing MIDTRANS_SERVER_KEY in env" },
-        { status: 500 }
-      );
+      return Response.json({ error: "Missing MIDTRANS_SERVER_KEY in env" }, { status: 500 });
     }
 
     const baseUrl = isProduction ? MIDTRANS_PROD_BASE : MIDTRANS_SANDBOX_BASE;
     const url = `${baseUrl}/snap/v1/transactions`;
 
     const body = await req.json();
+    // Basic validation so Midtrans doesn't 400 on empty payload
+    const hasTx = body?.transaction_details?.order_id && body?.transaction_details?.gross_amount;
+    if (!hasTx) {
+      return Response.json({ error: "Invalid payload: missing transaction_details" }, { status: 400 });
+    }
     const auth = Buffer.from(`${serverKey}:`).toString("base64");
 
     const res = await fetch(url, {
@@ -29,15 +31,21 @@ export async function POST(req: NextRequest) {
         Authorization: `Basic ${auth}`,
       },
       body: JSON.stringify(body),
-      // Next runtime/node: outbound fetch allowed by default; adjust if needed
-      // cache: "no-store",
+      // Avoid caching token responses
+      cache: "no-store",
     });
 
-    const data = await res.json();
+    const text = await res.text();
     if (!res.ok) {
-      return Response.json({ error: data }, { status: res.status });
+      // Pass-through midtrans error for easier debugging on FE
+      return Response.json({ error: text || `Midtrans error ${res.status}` }, { status: res.status });
     }
-    return Response.json(data);
+    try {
+      const data = JSON.parse(text);
+      return Response.json(data);
+    } catch {
+      return Response.json({ error: "Invalid JSON from Midtrans" }, { status: 502 });
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unexpected error";
     return Response.json({ error: message }, { status: 500 });
