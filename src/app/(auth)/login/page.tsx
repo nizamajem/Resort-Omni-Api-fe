@@ -20,11 +20,10 @@ export default function LoginPage() {
     } catch {}
   }, []);
 
-  const API_BASE = useMemo(() => {
-    const env = process.env.NEXT_PUBLIC_API_URL;
+    const API_BASE = useMemo(() => {
+    const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
-    // Fallback to common local backend port
-    if (typeof window !== "undefined") console.warn("NEXT_PUBLIC_API_URL not set. Falling back to http://localhost:4000/api");
+    if (typeof window !== "undefined") console.warn("API base URL not set. Falling back to http://localhost:4000/api");
     return "http://localhost:4000/api";
   }, []);
 

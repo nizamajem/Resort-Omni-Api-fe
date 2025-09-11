@@ -35,7 +35,7 @@ export default function AdminResortsAddPage() {
   const pageSize = 5;
 
   const API_BASE = useMemo(() => {
-    const env = process.env.NEXT_PUBLIC_API_URL;
+    const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     return "http://localhost:4000/api";
   }, []);

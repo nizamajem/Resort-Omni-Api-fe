@@ -10,7 +10,7 @@ type PkgId = "1h" | "3h" | "1d";
 type PackageAccount = { id: string; pkg: PkgId; email: string; password: string; status: "active" | "sold"; createdAt?: string };
 
 const API_BASE = (() => {
-  const env = process.env.NEXT_PUBLIC_API_URL;
+  const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
   if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
   return "http://localhost:4000/api";
 })();
