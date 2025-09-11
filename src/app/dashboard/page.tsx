@@ -68,11 +68,11 @@ export default function DashboardPage() {
 
   // Fetch availability of active accounts per package
   useEffect(() => {
+    if (!token) return;
     const run = async () => {
       try {
         const res = await fetch(`${API_BASE}/orders/availability`, {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          credentials: 'include',
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -81,8 +81,7 @@ export default function DashboardPage() {
     };
     run();
   }, [API_BASE, token]);
-
-  const canOrder = (id: Pkg["id"]) => {
+const canOrder = (id: Pkg["id"]) => {
     if (!availability) return true; // optimistic until fetched
     return (availability[id] || 0) > 0;
   };

@@ -86,10 +86,7 @@ export default function AdminPackagesAddPage() {
     }
   };
 
-  useEffect(() => {
-    if (!token) return;
-    fetchAccounts();
-    fetchCounts();
+  useEffect(() => {\r\n    if (!token) return;\r\n    fetchAccounts();\r\n    fetchCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterPkg, filterStatus, token, page]);
 
@@ -405,3 +402,4 @@ export default function AdminPackagesAddPage() {
     </main>
   );
 }
+

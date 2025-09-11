@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/app/components/sidebar";
 import NavBar from "@/app/components/navbar";
-import { cookies } from "next/headers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,32 +19,21 @@ export const metadata: Metadata = {
   description: "Management dashboard for resort bookings and payments",
 };
 
-// Mark this layout as dynamic because it reads cookies() at render-time
-export const dynamic = "force-dynamic";
-
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // cookies() must be awaited in Next 15
-  const cookieStore = await cookies();
-  const role = cookieStore.get("role")?.value || "";
-  const showSidebar = role === "superadmin";
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased text-gray-900 bg-gradient-to-b from-sky-50 to-slate-50`}>
         <NavBar />
-        {showSidebar ? (
-          <div className="min-h-screen">
-            <div className="mx-auto flex max-w-6xl">
-              <Sidebar />
-              <main className="min-w-0 flex-1 px-4 py-6">{children}</main>
-            </div>
+        <div className="min-h-screen">
+          <div className="mx-auto flex max-w-6xl">
+            <Sidebar />
+            <main className="min-w-0 flex-1 px-4 py-6">{children}</main>
           </div>
-        ) : (
-          children
-        )}
+        </div>
       </body>
     </html>
   );
