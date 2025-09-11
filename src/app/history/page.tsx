@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { api } from "@/app/lib/api";
 
 type HistoryRow = {
   id: string;

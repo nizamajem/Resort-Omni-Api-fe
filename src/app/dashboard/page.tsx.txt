@@ -127,11 +127,19 @@ const canOrder = (id: Pkg["id"]) => {
   credit_card: { secure: true },
 };
 const snapRes = await api.post("/payments/snap-token", { orderId, grossAmount: orderFor.price, itemName: `${orderFor.title} (${orderFor.unit})`, customer: { firstName: resortName || "Resort", email: userEmail || "" } }); const res = { ok: true } as any; const text = JSON.stringify(snapRes.data || {});
-const data: any = (typeof snapRes.data === "object" ? snapRes.data : {});
-      if (!data?.token) {
-        const detail = typeof data?.error === "string" ? data.error : "";
+const text = await res.text();
+      if (!res.ok) {
+        // Show server error details from route for easier debugging
+        let detail = "";
+        try { const j = JSON.parse(text); detail = typeof j?.error === 'string' ? j.error : text; } catch { detail = text; }
         setResultMsg(`Online payment initialization failed. ${detail ? `
 Detail: ${detail}` : ''}`.trim());
+        return;
+      }
+      let data: any = null;
+      try { data = JSON.parse(text); } catch {}
+      if (!data?.token) {
+        setResultMsg("Online payment initialization failed. Detail: Missing token from server.");
         return;
       }
       setSnapToken(data.token);

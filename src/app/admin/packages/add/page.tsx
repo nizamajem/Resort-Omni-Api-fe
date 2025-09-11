@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Label } from "@/app/components/ui/label";
+import { api } from "@/app/lib/api";
 import { Select } from "@/app/components/ui/select";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
@@ -53,8 +54,7 @@ export default function AdminPackagesAddPage() {
         url.searchParams.set("pkg", id);
         url.searchParams.set("status", "active");
         url.searchParams.set("limit", "1");
-        const res = await fetch(url.toString(), { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
-        const data = await res.json();
+        const { data } = await api.get("/package-accounts", { params: Object.fromEntries(url.searchParams as any) });
         const total = typeof data?.total === 'number' ? data.total : (Array.isArray(data?.data) ? data.data.length : 0);
         result[id] = total;
       }
@@ -70,10 +70,7 @@ export default function AdminPackagesAddPage() {
       if (filterPkg !== "all") url.searchParams.set("pkg", filterPkg);
       url.searchParams.set("offset", String((page - 1) * limit));
       url.searchParams.set("limit", String(limit));
-      const res = await fetch(url.toString(), {
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
-      const data = await res.json();
+      const { data } = await api.get("/package-accounts", { params: Object.fromEntries(url.searchParams as any) });
       const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
       const tot = typeof data?.total === 'number' ? data.total : list.length;
       setRows(list as PackageAccount[]);
@@ -116,13 +113,8 @@ export default function AdminPackagesAddPage() {
     }
     setAdding(true);
     try {
-      const res = await fetch(`${API_BASE}/package-accounts/batch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ pkg, items }),
-      });
-      const data = await res.json();
-      if (!res.ok || data?.error) {
+      const { data } = await api.post("/package-accounts/batch", { pkg, items });
+      if (!data || (data as any)?.error) {
         setAddMsg(data?.error || "Failed to add accounts");
       } else {
         setAddMsg(`Inserted ${data?.inserted || items.length} account(s)`);
@@ -147,7 +139,7 @@ export default function AdminPackagesAddPage() {
         body: JSON.stringify({ id: row.id, status: next }),
       });
       const data = await res.json();
-      if (!res.ok || data?.error) throw new Error(data?.error || "Failed");
+      if (!data || (data as any)?.error) throw new Error(data?.error || "Failed");
       // Refresh to keep pagination/total accurate
       fetchAccounts();
     } catch {
@@ -177,7 +169,7 @@ export default function AdminPackagesAddPage() {
         body: JSON.stringify({ id: row.id, email: editEmail, password: editPassword }),
       });
       const data = await res.json();
-      if (!res.ok || data?.error) throw new Error(data?.error || "Failed");
+      if (!data || (data as any)?.error) throw new Error(data?.error || "Failed");
       // Refresh to reflect changes
       fetchAccounts();
       cancelEdit();

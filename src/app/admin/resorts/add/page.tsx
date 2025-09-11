@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { api } from "@/app/lib/api";
 
 type Resort = {
   id: string;
@@ -87,12 +88,7 @@ export default function AdminResortsAddPage() {
     setSuccess(null);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const res = await fetch(`${API_BASE}/resorts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ resortName, email, password }),
-      });
-      const data = await res.json();
+      const { data } = await api.post("/resorts", { resortName, email, password });
       if (!res.ok || data?.error) {
         setError(data?.error || data?.message || "Failed to create resort");
         setSubmitting(false);
@@ -112,12 +108,7 @@ export default function AdminResortsAddPage() {
   const toggleStatus = async (row: Resort) => {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const res = await fetch(`${API_BASE}/resorts`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ id: row.id, status: row.status === "active" ? "disabled" : "active" }),
-      });
-      const data = await res.json();
+      const { data } = await api.post("/resorts", { resortName, email, password });
       if (res.ok && !data?.error) loadResorts();
     } catch {}
   };
@@ -159,12 +150,7 @@ export default function AdminResortsAddPage() {
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       const patch: any = { id: editRow.id, resortName: editRow.resortName, email: editRow.email };
       if (editPw) patch.password = editPw;
-      const res = await fetch(`${API_BASE}/resorts`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify(patch),
-      });
-      const data = await res.json();
+      const { data } = await api.post("/resorts", { resortName, email, password });
       if (res.ok && !data?.error) {
         setEditRow(null);
         setEditPw("");
