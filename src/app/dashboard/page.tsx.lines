@@ -145,24 +145,15 @@ const canOrder = (id: Pkg["id"]) => {
       const orderId = `ORDER-${orderFor.id}-${Date.now()}`;
       setLastOrderId(orderId);
       const snapReq = {
-  transaction_details: { order_id: orderId, gross_amount: orderFor.price },
-  item_details: [
-    { id: orderFor.id, price: orderFor.price, quantity: 1, name: `${orderFor.title} (${orderFor.unit})` },
-  ],
-  customer_details: { first_name: resortName || "Resort", email: userEmail || "demo@example.com" },
-  credit_card: { secure: true },
-};
-const res = await fetch(`${API_BASE}/payments/snap-token`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  body: JSON.stringify({
-    orderId,
-    grossAmount: orderFor.price,
-    itemName: `${orderFor.title} (${orderFor.unit})`,
-    customer: { firstName: resortName || "Resort", email: userEmail || "" },
-  }),
-});
-const text = await res.text();
+        transaction_details: { order_id: orderId, gross_amount: orderFor.price },
+        item_details: [
+          { id: orderFor.id, price: orderFor.price, quantity: 1, name: `${orderFor.title} (${orderFor.unit})` },
+        ],
+        customer_details: { first_name: resortName || "Resort", email: userEmail || "demo@example.com" },
+        credit_card: { secure: true },
+      };
+      const res = await fetch("/api/midtrans/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapReq) });
+      const text = await res.text();
       if (!res.ok) {
         // Show server error details from route for easier debugging
         let detail = "";

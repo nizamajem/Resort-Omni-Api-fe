@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/app/auth.context";
 import { useEffect, useState } from "react";
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [role, setRole] = useState<string | null>(null);
+  const { role, clear } = useAuth();
+  const router = useRouter();
+  const [roleState, setRole] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     try {
@@ -27,24 +31,20 @@ export default function Sidebar() {
     ), show: true },
     { href: "/admin/resorts/add", label: "Add Resort", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.118a7.5 7.5 0 0 1 15 0A17.933 17.933 0 0 1 12 21.75c-2.68 0-5.216-.586-7.5-1.632Z"/></svg>
-    ), show: role === "superadmin" },
+    ), show: (role === "superadmin" || roleState === "superadmin") },
     { href: "/admin/packages/add", label: "Packages", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.375 7.5 12 12.75 20.625 7.5M12 21.75l-8.625-5.25V7.5L12 2.25l8.625 5.25v9L12 21.75Z"/></svg>
-    ), show: role === "superadmin" },
+    ), show: (role === "superadmin" || roleState === "superadmin") },
     { href: "/history", label: "History", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3.5 3.5M12 3a9 9 0 1 0 9 9"/></svg>
     ), show: true },
   ].filter((x) => x.show);
 
   const onLogout = () => {
-    try {
-      localStorage.removeItem("token");
-      localStorage.removeItem("auth");
-      localStorage.removeItem("role");
-      document.cookie = `role=; Path=/; Max-Age=0`;
-      document.cookie = `resortName=; Path=/; Max-Age=0`;
-    } catch {}
-    window.location.href = "/login";
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try { clear(); } catch {}
+    router.replace("/");
   };
 
   return (

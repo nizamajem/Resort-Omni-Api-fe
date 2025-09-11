@@ -1,9 +1,12 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { useAuth } from "@/app/auth.context";
 import { useEffect, useMemo, useState } from "react";
 
-export default function LoginPage() {
+function LoginContent() {
+  const { setAuth } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
@@ -51,18 +54,20 @@ export default function LoginPage() {
       const role = (data?.user?.role || data?.role) as string | undefined; // 'superadmin' | 'resort'
       const resortName = (data?.user?.resortName || data?.resortName) as string | undefined;
       try {
+        setAuth({ token: token || "", role: role || "", email: data?.user?.email || data?.email || email, resortName: resortName || "" });
         localStorage.setItem("token", token || "");
         localStorage.setItem("auth", JSON.stringify({ email: data?.user?.email || data?.email || email, role, resortName }));
         localStorage.setItem("role", role || "");
+        document.cookie = `token=${encodeURIComponent(token || "")}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`;
         if (remember) localStorage.setItem("rememberEmail", email);
         else localStorage.removeItem("rememberEmail");
         document.cookie = `role=${role || ""}; Path=/; Max-Age=${60 * 60 * 24 * 7}`;
         if (resortName) document.cookie = `resortName=${encodeURIComponent(resortName)}; Path=/; Max-Age=${60 * 60 * 24 * 7}`;
       } catch {}
-      const next = searchParams?.get("next") || "";
+      const nextPath = searchParams?.get("next") || "";
       const defaultPath = "/dashboard";
-      const allowed = role === "superadmin" ? true : !next.startsWith("/admin");
-      router.replace(allowed && next ? next : defaultPath);
+      const allowed = role === "superadmin" ? true : !nextPath.startsWith("/admin");
+      router.replace(allowed && nextPath ? nextPath : defaultPath);
     } catch (err) {
       setError("Failed to sign in. Please try again.");
       setLoading(false);
@@ -169,5 +174,12 @@ export default function LoginPage() {
         </section>
       </div>
     </main>
+  );
+}
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginContent />
+    </Suspense>
   );
 }

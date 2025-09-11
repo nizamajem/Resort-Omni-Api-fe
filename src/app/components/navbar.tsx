@@ -2,14 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/app/auth.context";
 import { useEffect, useRef, useState } from "react";
 
 export default function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [role, setRole] = useState<string | null>(null);
+  const { role, email: ctxEmail, resortName: ctxResort, clear } = useAuth();
+  const [roleState, setRole] = useState<string | null>(null);
   const [resortName, setResortName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
+  const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -39,14 +42,10 @@ export default function NavBar() {
   if (pathname && pathname.startsWith("/login")) return null;
 
   const onLogout = () => {
-    try {
-      localStorage.removeItem("auth");
-      localStorage.removeItem("role");
-      localStorage.removeItem("token");
-      document.cookie = `role=; Path=/; Max-Age=0`;
-      document.cookie = `resortName=; Path=/; Max-Age=0`;
-    } catch {}
-    router.replace('/login');
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try { clear(); } catch {}
+    router.replace("/");
   };
 
   const links = [
