@@ -38,6 +38,7 @@ export default function DashboardPage() {
   // Auth info (token + resort name)
   const [token, setToken] = useState<string | null>(null);
   const [resortName, setResortName] = useState<string>("");
+  const [userEmail, setUserEmail] = useState<string>("");
 
   // Prefer localStorage token; fallback to cookie if present
   const readToken = () => {
@@ -57,6 +58,7 @@ export default function DashboardPage() {
       const raw = localStorage.getItem("auth");
       const auth = raw ? JSON.parse(raw) : null;
       setResortName(auth?.resortName || "");
+      setUserEmail(auth?.email || "");
     } catch {}
 
     const onStorage = () => setToken(readToken());
@@ -148,7 +150,7 @@ export default function DashboardPage() {
         item_details: [
           { id: orderFor.id, price: orderFor.price, quantity: 1, name: `${orderFor.title} (${orderFor.unit})` },
         ],
-        customer_details: { first_name: "Resort", email: "resort@example.com" },
+        customer_details: { first_name: resortName || "Resort", email: userEmail || "demo@example.com" },
         credit_card: { secure: true },
       };
       const res = await fetch("/api/midtrans/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapReq) });
@@ -235,9 +237,9 @@ export default function DashboardPage() {
 
       {/* Detail modal */}
       {detailFor && (
-        <div className="fixed inset-0 z-50 grid place-items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setDetailFor(null)} />
-          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">{detailFor.title}</h3>
             <p className="mt-2 text-sm text-slate-600">{detailFor.desc}</p>
 
@@ -272,9 +274,9 @@ export default function DashboardPage() {
 
       {/* Payment choice modal */}
       {orderFor && methodChoiceOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMethodChoiceOpen(false)} />
-          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">Choose Payment Method</h3>
             <p className="mt-1 text-sm text-slate-600">{orderFor.title} • {fmt(orderFor.price)} / {orderFor.unit}</p>
             <div className="mt-4 grid gap-3">
@@ -288,9 +290,9 @@ export default function DashboardPage() {
 
       {/* Confirm Cash modal */}
       {orderFor && confirmCashOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmCashOpen(false)} />
-          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">Confirm Cash Order</h3>
             <p className="mt-2 text-sm text-slate-600">
               This order will be recorded in our system.
@@ -306,9 +308,9 @@ export default function DashboardPage() {
 
       {/* Confirm Online modal */}
       {orderFor && confirmOnlineOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmOnlineOpen(false)} />
-          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">Confirm Online Payment</h3>
             <p className="mt-2 text-sm text-slate-600">You can pay using ShopeePay, QRIS, GoPay, or Dana via {process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === 'true' ? 'Midtrans (Production)' : 'Midtrans (Sandbox)'}.</p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -392,9 +394,9 @@ export default function DashboardPage() {
 
       {/* Credential modal */}
       {cred && (
-        <div className="fixed inset-0 z-50 grid place-items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setCred(null)} />
-          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <div className="mb-3 flex items-center gap-3">
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>

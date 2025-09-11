@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/app/components/sidebar";
+import NavBar from "@/app/components/navbar";
 import { cookies } from "next/headers";
 
 const geistSans = Geist({
@@ -34,6 +35,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased text-gray-900 bg-gradient-to-b from-sky-50 to-slate-50`}>
+        <NavBar />
         {showSidebar ? (
           <div className="min-h-screen">
             <div className="mx-auto flex max-w-6xl">
