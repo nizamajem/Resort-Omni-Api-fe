@@ -31,17 +31,17 @@ export function middleware(req: NextRequest) {
   }
 
   // Require auth
-  const role = req.cookies.get('role')?.value;
-  if (!role) {
-    const url = new URL('/login', req.url);
-    url.searchParams.set('next', pathname);
-    return NextResponse.redirect(url);
-  }
+  // const role = req.cookies.get('role')?.value;
+  // if (!role) {
+  //   const url = new URL('/login', req.url);
+  //   url.searchParams.set('next', pathname);
+  //   return NextResponse.redirect(url);
+  // }
 
   // Restrict admin to superadmin
-  if (pathname.startsWith('/admin') && !isSuper(role)) {
-    return NextResponse.redirect(new URL('/dashboard', req.url));
-  }
+  // if (pathname.startsWith('/admin') && !isSuper(role)) {
+  //   return NextResponse.redirect(new URL('/dashboard', req.url));
+  // }
 
   return NextResponse.next();
 }

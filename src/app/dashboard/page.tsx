@@ -213,9 +213,6 @@ Detail: ${detail}` : ''}`.trim());
               <div className="text-sm font-semibold text-slate-800">What you get</div>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
                 <li>{fmt(detailFor.price)} Reflow balance to kickstart your rides</li>
-                <li>Welcome coupon: extra 10 minutes on your first ride</li>
-                <li>Free battery swaps during your rental period</li>
-                <li>First 1 minute free to check the bike (brakes, tires, handlebar, etc.)</li>
               </ul>
             </div>
 

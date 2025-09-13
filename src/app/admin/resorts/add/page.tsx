@@ -87,9 +87,9 @@ export default function AdminResortsAddPage() {
     setError(null);
     setSuccess(null);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const { data } = await api.post("/resorts", { resortName, email, password });
-      if (!res.ok || data?.error) {
+      const res = await api.post("/resorts", { resortName, email, password });
+      const data = res?.data;
+      if (data?.error) {
         setError(data?.error || data?.message || "Failed to create resort");
         setSubmitting(false);
         return;
@@ -107,9 +107,10 @@ export default function AdminResortsAddPage() {
 
   const toggleStatus = async (row: Resort) => {
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const { data } = await api.post("/resorts", { resortName, email, password });
-      if (res.ok && !data?.error) loadResorts();
+      const nextStatus = row.status === "active" ? "disabled" : "active";
+      const res = await api.put("/resorts", { id: row.id, status: nextStatus });
+      const data = res?.data;
+      if (!data?.error) loadResorts();
     } catch {}
   };
 
@@ -147,11 +148,11 @@ export default function AdminResortsAddPage() {
         setEditSaving(false);
         return;
       }
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       const patch: any = { id: editRow.id, resortName: editRow.resortName, email: editRow.email };
       if (editPw) patch.password = editPw;
-      const { data } = await api.post("/resorts", { resortName, email, password });
-      if (res.ok && !data?.error) {
+      const res = await api.put("/resorts", patch);
+      const data = res?.data;
+      if (!data?.error) {
         setEditRow(null);
         setEditPw("");
         setEditPw2("");
