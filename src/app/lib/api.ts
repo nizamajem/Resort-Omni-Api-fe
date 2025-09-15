@@ -1,9 +1,15 @@
 import axios from "axios";
 
 function getBase() {
-  const raw = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim();
-  const base = raw.replace(/\/$/, "");
-  return `${base}/api`;
+  const rawA = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim();
+  const rawB = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+  const chosen = rawA || rawB;
+  if (chosen) {
+    const base = chosen.replace(/\/$/, "");
+    return `${base}/api`;
+  }
+  // Fallback to local dev backend
+  return "http://localhost:4000/api";
 }
 
 export const api = axios.create({
@@ -12,6 +18,12 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// Simple client-side API logger for diagnostics
+declare global {
+  interface Window { __apiLogs?: any[] }
+}
+try { if (typeof window !== 'undefined' && !window.__apiLogs) window.__apiLogs = []; } catch {}
+
 api.interceptors.request.use((config) => {
   try {
     const t = typeof window !== "undefined" ? localStorage.getItem("token") : null;
@@ -19,13 +31,56 @@ api.interceptors.request.use((config) => {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${t}`;
     }
+    // Log request
+    try {
+      if (typeof window !== 'undefined') {
+        window.__apiLogs = window.__apiLogs || [];
+        window.__apiLogs.push({
+          ts: new Date().toISOString(),
+          dir: 'request',
+          url: `${config.baseURL || ''}${config.url || ''}`,
+          method: (config.method || 'GET').toUpperCase(),
+          body: config.data || null,
+        });
+      }
+    } catch {}
   } catch {}
   return config;
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.__apiLogs = window.__apiLogs || [];
+        window.__apiLogs.push({
+          ts: new Date().toISOString(),
+          dir: 'response',
+          url: res?.config ? `${res.config.baseURL || ''}${res.config.url || ''}` : '',
+          status: res?.status,
+          ok: true,
+          body: res?.data,
+        });
+      }
+    } catch {}
+    return res;
+  },
   (err) => {
+    try {
+      if (typeof window !== 'undefined') {
+        const cfg = err?.config;
+        window.__apiLogs = window.__apiLogs || [];
+        window.__apiLogs.push({
+          ts: new Date().toISOString(),
+          dir: 'response',
+          url: cfg ? `${cfg.baseURL || ''}${cfg.url || ''}` : '',
+          status: err?.response?.status,
+          ok: false,
+          body: err?.response?.data,
+          error: err?.message,
+        });
+      }
+    } catch {}
     const status = err?.response?.status;
     if (status === 401 || status === 403) {
       try {

@@ -72,5 +72,19 @@ export default function MidtransPopup({ token, onSuccess, onPending, onError, on
     });
   }, [token, ready, onSuccess, onPending, onError, onClose]);
 
-  return null;
+  return (
+    <div className="fixed inset-0 z-[110] grid place-items-center bg-black/30">
+      <div className="w-[90%] max-w-sm rounded-2xl bg-white p-5 text-center shadow-xl ring-1 ring-slate-200">
+        <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M6 4.5h12A2.25 2.25 0 0 1 20.25 6.75v10.5A2.25 2.25 0 0 1 18 19.5H6A2.25 2.25 0 0 1 3.75 17.25V6.75A2.25 2.25 0 0 1 6 4.5Z"/></svg>
+        </div>
+        <div className="text-lg font-semibold text-slate-900">Opening Payment</div>
+        <div className="mt-1 text-sm text-slate-600">Midtrans Snap is being prepared...</div>
+        <div className="mt-4 inline-flex items-center gap-2 text-xs text-slate-500">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
+          Please wait a moment
+        </div>
+      </div>
+    </div>
+  );
 }

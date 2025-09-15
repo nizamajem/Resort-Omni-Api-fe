@@ -18,16 +18,44 @@ export default function DashboardPage() {
 
   const [detailFor, setDetailFor] = useState<Pkg | null>(null);
   const [orderFor, setOrderFor] = useState<Pkg | null>(null);
-  const [methodChoiceOpen, setMethodChoiceOpen] = useState(false);
-  const [confirmOnlineOpen, setConfirmOnlineOpen] = useState(false);
+  const [guestInfoOpen, setGuestInfoOpen] = useState(false);
+  const [guestName, setGuestName] = useState("");
+  const [roomNumber, setRoomNumber] = useState("");
+  // initial payment modals removed; payment only on Pay Now
   const [confirmCashOpen, setConfirmCashOpen] = useState(false);
+  const [agreeChecked, setAgreeChecked] = useState(false);
+  const [openPrivacy, setOpenPrivacy] = useState(false);
+  const [openAgreement, setOpenAgreement] = useState(false);
   const [snapToken, setSnapToken] = useState<string | null>(null);
   const [snapOpen, setSnapOpen] = useState(false);
+  const [snapContext, setSnapContext] = useState<{ mode: 'extras'; rentalId?: string; amount?: number } | null>(null);
   const [processing, setProcessing] = useState(false);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
   const [lastOrderId, setLastOrderId] = useState<string | null>(null);
   const [cred, setCred] = useState<{ email: string; password: string } | null>(null);
   const [availability, setAvailability] = useState<{ '1h': number; '3h': number; '1d': number } | null>(null);
+  const [nowTick, setNowTick] = useState(0);
+  const [loadedLocal, setLoadedLocal] = useState(false);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [endTarget, setEndTarget] = useState<RunningRental | null>(null);
+  const [payConfirmOpen, setPayConfirmOpen] = useState(false);
+  const [payTarget, setPayTarget] = useState<RunningRental | null>(null);
+  const [payBusy, setPayBusy] = useState(false);
+
+  type RunningRental = {
+    id: string;
+    guestName: string;
+    roomNumber: string;
+    pkg: Pkg["id"];
+    packageName: string;
+    basePrice: number;
+    baseMinutes: number;
+    startedAt: number;
+    endedAt?: number;
+    status: 'active' | 'unpaid';
+    amountDue?: number;
+  };
+  const [running, setRunning] = useState<RunningRental[]>([]);
 
   // Backend base URL
   const API_BASE = useMemo(() => {
@@ -77,6 +105,42 @@ export default function DashboardPage() {
     };
     run();
   }, [API_BASE, token]);
+  // Load running rentals from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('runningRentals');
+      if (raw) setRunning(JSON.parse(raw));
+    } catch {}
+    setLoadedLocal(true);
+  }, []);
+  // Persist running rentals (skip initial mount until local loaded)
+  useEffect(() => {
+    if (!loadedLocal) return;
+    try { localStorage.setItem('runningRentals', JSON.stringify(running)); } catch {}
+  }, [running, loadedLocal]);
+  // Load running rentals from server when logged in
+  useEffect(() => {
+    const loadServer = async () => {
+      if (!token) return;
+      try {
+        const { data } = await api.get('/rentals/list');
+        if (Array.isArray(data)) {
+          // Always replace server-backed items with server response,
+          // but keep client-only (temporary RUN-*) rows.
+          setRunning((prev) => {
+            const clientOnly = prev.filter((r: any) => String(r.id || '').startsWith('RUN-'));
+            return [...(data as any[]), ...clientOnly];
+          });
+        }
+      } catch {}
+    };
+    loadServer();
+  }, [token]);
+  // Timer tick
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
 const canOrder = (id: Pkg["id"]) => {
     if (!availability) return true; // optimistic until fetched
     return (availability[id] || 0) > 0;
@@ -92,17 +156,79 @@ const canOrder = (id: Pkg["id"]) => {
 
   const onOrder = (p: Pkg) => {
     setOrderFor(p);
-    setMethodChoiceOpen(true);
+    setGuestInfoOpen(true);
+    setGuestName("");
+    setRoomNumber("");
+    setAgreeChecked(false);
   };
 
   const orderCash = async () => {
     if (!orderFor) return;
-    setMethodChoiceOpen(false);
     setConfirmCashOpen(false);
+    setAgreeChecked(false);
     setProcessing(true);
     try {
-      const { data } = await api.post("/orders/cash", { pkg: orderFor.id, packageName: orderFor.title, price: orderFor.price, duration: orderFor.unit, resortName: resortName || "" });
-      if (!data || (data as any)?.error) { setResultMsg(((data as any)?.error) || "Failed to record cash order."); } else { const c = (data as any)?.credential; if (c?.email && c?.password) { setCred({ email: c.email, password: c.password }); setResultMsg(null); } else { setResultMsg("Order recorded. Credentials will be sent via email."); } }
+      const { data } = await api.post("/orders/cash", {
+        pkg: orderFor.id,
+        packageName: orderFor.title,
+        price: orderFor.price,
+        duration: orderFor.unit,
+        resortName: resortName || "",
+        guestName,
+        roomNumber,
+      });
+      if (!data || (data as any)?.error) {
+        setResultMsg(((data as any)?.error) || "Failed to record cash order.");
+      } else {
+        const c = (data as any)?.credential;
+        if (c?.email && c?.password) {
+          setCred({ email: c.email, password: c.password });
+          // Create server-side rental (or use rental returned by /orders/cash)
+          try {
+            const rent = (data as any)?.rental;
+            if (rent && rent.id) {
+              setRunning((prev) => ([...prev, rent]));
+              setResultMsg('Rental started. Credentials ready.');
+              return;
+            }
+            const { data: r } = await api.post('/rentals/start', {
+              pkg: orderFor.id,
+              packageName: orderFor.title,
+              price: orderFor.price,
+              duration: orderFor.unit,
+              guestName,
+              roomNumber,
+              resortName: resortName || undefined,
+            });
+            if (r && r.id) {
+              setRunning((prev) => ([...prev, r]));
+              setResultMsg('Rental started. Credentials ready.');
+            } else {
+              setResultMsg('Rental start did not return an id. Please check backend.');
+              throw new Error('no_rental');
+            }
+          } catch (e: any) {
+            // fallback to local so UI shows immediately, and inform user
+            const baseMinutes = orderFor.id === '1h' ? 60 : orderFor.id === '3h' ? 180 : 1440;
+            setRunning((prev) => ([
+              ...prev,
+              { id: `RUN-${Date.now()}`,
+                guestName: guestName || 'Guest',
+                roomNumber: roomNumber || '-',
+                pkg: orderFor.id,
+                packageName: orderFor.title,
+                basePrice: orderFor.price,
+                baseMinutes,
+                startedAt: Date.now(),
+                status: 'active' } as any,
+            ]));
+            setResultMsg('Rental started locally (server start failed). Please verify backend /rentals/start.');
+          }
+          setResultMsg(null);
+        } else {
+          setResultMsg("Order recorded. Credentials will be sent via email.");
+        }
+      }
     } catch {
       setResultMsg("Failed to record cash order.");
     } finally {
@@ -110,38 +236,23 @@ const canOrder = (id: Pkg["id"]) => {
     }
   };
 
-  const orderOnline = async () => {
-    if (!orderFor) return;
-    setMethodChoiceOpen(false);
-    setConfirmOnlineOpen(false);
-    setProcessing(true);
-    try {
-      const orderId = `ORDER-${orderFor.id}-${Date.now()}`;
-      setLastOrderId(orderId);
-      const snapReq = {
-  transaction_details: { order_id: orderId, gross_amount: orderFor.price },
-  item_details: [
-    { id: orderFor.id, price: orderFor.price, quantity: 1, name: `${orderFor.title} (${orderFor.unit})` },
-  ],
-  customer_details: { first_name: resortName || "Resort", email: userEmail || "demo@example.com" },
-  credit_card: { secure: true },
-};
-const snapRes = await api.post("/payments/snap-token", { orderId, grossAmount: orderFor.price, itemName: `${orderFor.title} (${orderFor.unit})`, customer: { firstName: resortName || "Resort", email: userEmail || "" } }); const res = { ok: true } as any; const text = JSON.stringify(snapRes.data || {});
-const data: any = (typeof snapRes.data === "object" ? snapRes.data : {});
-      if (!data?.token) {
-        const detail = typeof data?.error === "string" ? data.error : "";
-        setResultMsg(`Online payment initialization failed. ${detail ? `
-Detail: ${detail}` : ''}`.trim());
-        return;
-      }
-      setSnapToken(data.token);
-      setSnapOpen(true);
-    } catch {
-      setResultMsg("Online payment initialization failed.");
-    } finally {
-      setProcessing(false);
-    }
-  };
+  // Online payment is now only triggered from Pay Now on unpaid rows
+
+  // Pay button for unpaid rentals
+  function PayUnpaidBtn({ rental, onOpen }: { rental: any; onOpen: (r: any) => void }) {
+    const [busy, setBusy] = useState(false);
+    return (
+      <button
+        disabled={busy}
+        onClick={async () => {
+          onOpen(rental);
+        }}
+        className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+      >
+        {busy ? 'Processing…' : 'Pay Now'}
+      </button>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -236,17 +347,26 @@ Detail: ${detail}` : ''}`.trim());
         </div>
       )}
 
-      {/* Payment choice modal */}
-      {orderFor && methodChoiceOpen && (
+      {/* Guest info modal */}
+      {orderFor && guestInfoOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMethodChoiceOpen(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => setGuestInfoOpen(false)} />
           <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
-            <h3 className="text-lg font-semibold text-slate-900">Choose Payment Method</h3>
-            <p className="mt-1 text-sm text-slate-600">{orderFor.title} • {fmt(orderFor.price)} / {orderFor.unit}</p>
-            <div className="mt-4 grid gap-3">
-              <button onClick={() => { setMethodChoiceOpen(false); setConfirmCashOpen(true); }} className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cash (Pay on site)</button>
-              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-700">Online payment available: QRIS/VA/CC ({process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === 'true' ? 'Midtrans Production' : 'Midtrans Sandbox'})</div>
-              <button onClick={() => { setMethodChoiceOpen(false); setConfirmOnlineOpen(true); }} className="h-11 w-full rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Online Payment</button>
+            <h3 className="text-lg font-semibold text-slate-900">Guest Information</h3>
+            <p className="mt-1 text-sm text-slate-600">Please input guest name and room number for this order.</p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name</label>
+                <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="e.g. John Doe" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200 focus:border-sky-500 focus:ring-sky-100" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Room Number</label>
+                <input value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 203" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200 focus:border-sky-500 focus:ring-sky-100" />
+              </div>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button onClick={() => setGuestInfoOpen(false)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cancel</button>
+              <button onClick={() => { if (!guestName.trim() || !roomNumber.trim()) return; setGuestInfoOpen(false); setConfirmCashOpen(true); }} disabled={!guestName.trim() || !roomNumber.trim()} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition enabled:hover:bg-sky-700 disabled:opacity-50">Continue</button>
             </div>
           </div>
         </div>
@@ -257,89 +377,319 @@ Detail: ${detail}` : ''}`.trim());
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmCashOpen(false)} />
           <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
-            <h3 className="text-lg font-semibold text-slate-900">Confirm Cash Order</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              This order will be recorded in our system.
-              Please confirm you would like to proceed with cash payment for {orderFor.title} ({fmt(orderFor.price)}).
-            </p>
+            <h3 className="text-lg font-semibold text-slate-900">Start Rental</h3>
+            <p className="mt-2 text-sm text-slate-600">Please confirm to start rental for {orderFor.title} ({fmt(orderFor.price)}).</p>
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-slate-200">
+              Guest: <span className="font-medium text-slate-900">{guestName}</span> • Room: <span className="font-medium text-slate-900">{roomNumber}</span>
+            </div>
+            <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
+              <input type="checkbox" checked={agreeChecked} onChange={(e) => setAgreeChecked(e.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" />
+              <span>
+                I agree to the <button onClick={() => setOpenAgreement(true)} className="text-sky-700 underline">User Agreement</button> and <button onClick={() => setOpenPrivacy(true)} className="text-sky-700 underline">Privacy Policy</button>.
+              </span>
+            </label>
             <div className="mt-5 flex gap-3">
-              <button onClick={orderCash} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Yes, proceed</button>
+              <button onClick={orderCash} disabled={!agreeChecked} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition enabled:hover:bg-sky-700 disabled:opacity-50">Yes, start</button>
               <button onClick={() => setConfirmCashOpen(false)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Confirm Online modal */}
-      {orderFor && confirmOnlineOpen && (
+      
+
+      {/* Legal modals */}
+      {(openPrivacy || openAgreement) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmOnlineOpen(false)} />
-          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
-            <h3 className="text-lg font-semibold text-slate-900">Confirm Online Payment</h3>
-            <p className="mt-2 text-sm text-slate-600">You can pay using ShopeePay, QRIS, GoPay, or Dana via {process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === 'true' ? 'Midtrans (Production)' : 'Midtrans (Sandbox)'}.</p>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs">
-              <span className="inline-flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 font-medium text-orange-700 ring-1 ring-orange-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" /> ShopeePay
-              </span>
-              <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700 ring-1 ring-slate-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-500" /> QRIS
-              </span>
-              <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700 ring-1 ring-sky-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-sky-500" /> GoPay
-              </span>
-              <span className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 font-medium text-indigo-700 ring-1 ring-indigo-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" /> Dana
-              </span>
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setOpenPrivacy(false); setOpenAgreement(false); }} />
+          <div className="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <h3 className="text-lg font-semibold text-slate-900">{openPrivacy ? 'Privacy Policy' : 'User Agreement'}</h3>
+            <div className="mt-3 space-y-3 text-sm leading-relaxed text-slate-700">
+              <p>Terima kasih telah menggunakan layanan Re:Flow. Dokumen ini menjelaskan {openPrivacy ? 'bagaimana kami mengumpulkan, menggunakan, dan melindungi data pribadi Anda.' : 'syarat dan ketentuan penggunaan layanan kami, termasuk kewajiban pengguna saat menyewa dan menggunakan perangkat.'}</p>
+              <p>Inti kebijakan: data yang Anda masukkan (nama dan nomor kamar) dipakai untuk keperluan identifikasi penyewaan, penagihan, dan catatan operasional resort.</p>
+              <p>Untuk dokumen versi lengkap, silakan hubungi admin atau buka halaman legal resmi kami.</p>
             </div>
-            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Package</span>
-                <span className="font-medium text-slate-900">{orderFor.title}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-slate-600">Duration</span>
-                <span className="font-medium text-slate-900">{orderFor.unit}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-slate-600">Amount</span>
-                <span className="font-semibold text-slate-900">{fmt(orderFor.price)}</span>
-              </div>
-            </div>
-            <div className="mt-2 text-xs text-slate-500">You will be redirected to the Midtrans Snap popup to complete payment securely.</div>
-            <div className="mt-5 flex gap-3">
-              <button onClick={() => { setConfirmOnlineOpen(false); orderOnline(); }} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Yes, continue</button>
-              <button onClick={() => setConfirmOnlineOpen(false)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cancel</button>
+            <div className="mt-5 flex justify-end">
+              <button onClick={() => { setOpenPrivacy(false); setOpenAgreement(false); }} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">Tutup</button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Running rentals */}
+      <section className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200 shadow-sm">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9"/></svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Running Rentals</h2>
+              <p className="text-xs text-slate-600">Active and unpaid rentals appear here. Unpaid rows are highlighted.</p>
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="px-3 py-2 font-medium">Guest</th>
+                <th className="px-3 py-2 font-medium">Room</th>
+                <th className="px-3 py-2 font-medium">Package</th>
+                <th className="px-3 py-2 font-medium">Start</th>
+                <th className="px-3 py-2 font-medium">Rental time</th>
+                <th className="px-3 py-2 font-medium">Charge</th>
+                <th className="px-3 py-2 font-medium">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {running.length === 0 ? (
+                <tr><td colSpan={7} className="px-3 py-4 text-center text-slate-500">No running rentals.</td></tr>
+              ) : (
+                running.map((r) => {
+                  const base = r.baseMinutes;
+                  const end = r.endedAt || Date.now();
+                  const elapsedSec = Math.max(0, Math.floor((end - r.startedAt) / 1000));
+                  const elapsedMin = Math.max(0, Math.ceil((end - r.startedAt) / 60000));
+                  const extraBlocks = Math.max(0, Math.ceil(Math.max(0, elapsedMin - base) / 30));
+                  const charge = r.status === 'active' ? (r.basePrice + extraBlocks * 30000) : (r.amountDue || (r.basePrice + extraBlocks * 30000));
+                  const hours = Math.floor(elapsedSec / 3600);
+                  const minutes = Math.floor((elapsedSec % 3600) / 60);
+                  const seconds = elapsedSec % 60;
+                  const startedStr = new Date(r.startedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+                  const rowClass = r.status === 'unpaid' ? 'bg-rose-50' : '';
+                  return (
+                    <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
+                      <td className="px-3 py-2 text-slate-800">{r.guestName}</td>
+                      <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
+                      <td className="px-3 py-2 text-slate-800">{r.packageName}</td>
+                      <td className="px-3 py-2 text-slate-700">{startedStr}</td>
+                      <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2,'0')}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">{fmt(charge)}</td>
+                      <td className="px-3 py-2">
+                        {r.status === 'active' ? (
+                          <button
+                            onClick={() => { setEndTarget(r); setEndConfirmOpen(true); }}
+                            className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-medium text-white hover:bg-amber-600"
+                          >End Rental</button>
+                        ) : (
+                          <PayUnpaidBtn rental={r} onOpen={(rt) => { setPayTarget(rt); setPayConfirmOpen(true); }} />
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Midtrans Snap popup */}
       {snapOpen && snapToken && (
         <MidtransPopup
           token={snapToken}
-          onSuccess={async () => {
-            // Finalize payment to backend and fetch credentials
-            if (!orderFor) { setResultMsg("Payment success."); setSnapOpen(false); setSnapToken(null); return; }
+          onSuccess={async (res: any) => {
             try {
-              const { data } = await api.post("/payments/complete", { orderId: lastOrderId || `ORDER-${orderFor.id}-${Date.now()}`, pkg: orderFor.id, packageName: orderFor.title, price: orderFor.price, duration: orderFor.unit, resortName: resortName || "" }); const c = (data as any)?.credential;
-              if (c?.email && c?.password) {
-                setCred({ email: c.email, password: c.password });
-                setResultMsg(null);
-              } else {
-                setResultMsg("Payment success.");
+              if (snapContext?.rentalId) {
+                try {
+                  await api.post('/rentals/settle', {
+                    rentalId: snapContext.rentalId,
+                    orderId: res?.order_id,
+                    paymentType: res?.payment_type,
+                  });
+                } catch {}
+                setRunning((prev) => prev.filter((x) => x.id !== snapContext.rentalId));
               }
-            } catch {
               setResultMsg("Payment success.");
             } finally {
               setSnapOpen(false);
               setSnapToken(null);
+              setSnapContext(null);
             }
           }}
           onPending={() => { setResultMsg("Payment pending."); setSnapOpen(false); setSnapToken(null); }}
           onError={() => { setResultMsg("Payment failed."); setSnapOpen(false); setSnapToken(null); }}
           onClose={() => { setResultMsg("Payment window closed."); setSnapOpen(false); setSnapToken(null); }}
         />
+      )}
+
+      {/* End rental confirmation */}
+      {endConfirmOpen && endTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setEndConfirmOpen(false); setEndTarget(null); }} />
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <h3 className="text-lg font-semibold text-slate-900">End Rental?</h3>
+            <p className="mt-2 text-sm text-slate-600">Are you sure you want to end this rental now?</p>
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200">
+              <div className="flex items-center justify-between"><span className="text-slate-600">Guest</span><span className="font-medium text-slate-900">{endTarget.guestName}</span></div>
+              <div className="mt-1 flex items-center justify-between"><span className="text-slate-600">Room</span><span className="font-medium text-slate-900">{endTarget.roomNumber}</span></div>
+              <div className="mt-1 flex items-center justify-between"><span className="text-slate-600">Package</span><span className="font-medium text-slate-900">{endTarget.packageName}</span></div>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={async () => {
+                  // Immediately reflect locally so UI always updates
+                  const endAt = Date.now();
+                  const elapsedM = Math.max(0, Math.ceil((endAt - endTarget.startedAt) / 60000));
+                  const blocks = Math.max(0, Math.ceil(Math.max(0, elapsedM - endTarget.baseMinutes) / 30));
+                  const due = endTarget.basePrice + blocks * 30000;
+                  setRunning((prev) => prev.map((x) => x.id === endTarget.id ? { ...x, status: 'unpaid', endedAt: endAt, amountDue: due } : x));
+                  setResultMsg('Rental ended. Please proceed to payment.');
+                  // Try to persist to server (if logged in and server id)
+                  try {
+                    const isServerId = typeof endTarget.id === 'string' && !String(endTarget.id).startsWith('RUN-');
+                    if (isServerId) {
+                      await api.post('/rentals/end', { rentalId: endTarget.id });
+                    }
+                  } catch {}
+                  setEndConfirmOpen(false);
+                  setEndTarget(null);
+                }}
+                className="h-11 flex-1 rounded-xl bg-amber-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-amber-700"
+              >Yes, end now</button>
+              <button onClick={() => { setEndConfirmOpen(false); setEndTarget(null); }} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">No</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pay confirmation modal */}
+      {payConfirmOpen && payTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { if (!payBusy) { setPayConfirmOpen(false); setPayTarget(null); } }} />
+          <div className="relative w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-lg bg-rose-50 text-rose-700 ring-1 ring-rose-200">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9"/></svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Confirm Payment</h3>
+            </div>
+            {(() => {
+              const start = payTarget.startedAt;
+              const end = payTarget.endedAt || Date.now();
+              const durationSec = Math.max(0, Math.floor((end - start)/1000));
+              const hh = String(Math.floor(durationSec/3600)).padStart(2,'0');
+              const mm = String(Math.floor((durationSec%3600)/60)).padStart(2,'0');
+              const ss = String(durationSec%60).padStart(2,'0');
+              const durationMin = Math.max(0, Math.ceil((end - start)/60000));
+              const extraMin = Math.max(0, durationMin - payTarget.baseMinutes);
+              const blocks = Math.max(0, Math.ceil(extraMin/30));
+              const extrasCost = blocks * 30000;
+              const total = (payTarget.amountDue ?? (payTarget.basePrice + extrasCost));
+              const startStr = new Date(start).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+              const endStr = new Date(end).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+              return (
+                <div>
+                  <div className="grid gap-2 rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Guest</span>
+                      <span className="font-medium text-slate-900">{payTarget.guestName}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Room</span>
+                      <span className="font-medium text-slate-900">{payTarget.roomNumber}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Package</span>
+                      <span className="font-medium text-slate-900">{payTarget.packageName}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Start time</span>
+                      <span className="font-medium text-slate-900">{startStr}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">End time</span>
+                      <span className="font-medium text-slate-900">{endStr}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Rental duration</span>
+                      <span className="font-medium text-slate-900">{hh}:{mm}:{ss}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Extra time</span>
+                      <span className="font-medium text-slate-900">{extraMin} min ({blocks} x 30 min)</span>
+                    </div>
+                  </div>
+                  <div className="mt-4 rounded-xl bg-white p-4 ring-1 ring-slate-200">
+                    <div className="text-sm font-semibold text-slate-800">Payment Breakdown</div>
+                    <div className="mt-2 space-y-1 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600">Package</span>
+                        <span className="font-medium text-slate-900">{fmt(payTarget.basePrice)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600">Extra time ({blocks} x 30 min)</span>
+                        <span className="font-medium text-slate-900">{fmt(extrasCost)}</span>
+                      </div>
+                      <div className="my-2 h-px bg-slate-200" />
+                      <div className="flex items-center justify-between text-base">
+                        <span className="font-semibold text-slate-900">Total</span>
+                        <span className="font-semibold text-slate-900">{fmt(total)}</span>
+                      </div>
+                    </div>
+                  </div>
+                    <div className="mt-5 flex gap-3">
+                      <button
+                        disabled={payBusy}
+                        onClick={async () => {
+                          try {
+                            setPayBusy(true);
+                            const orderId = `RENTAL-${payTarget.id}-${Date.now()}`;
+                            const amt = Number(payTarget.amountDue || total || 0);
+                            const resp = await api.post('/payments/snap-token', {
+                              orderId,
+                              grossAmount: amt,
+                              itemName: `Extra Charge ${payTarget.packageName}`,
+                              customer: { firstName: resortName || 'Resort', email: userEmail || '' },
+                            });
+                            const token = (resp?.data || {}).token;
+                            if (!token) { setResultMsg('Failed to start payment.'); return; }
+                            setPayConfirmOpen(false); setPayTarget(null); setPayBusy(false);
+                            setSnapContext({ mode: 'extras', rentalId: payTarget.id, amount: amt });
+                            setSnapToken(token);
+                            setSnapOpen(true);
+                          } catch {
+                            setResultMsg('Failed to start payment.');
+                          } finally {
+                            setPayBusy(false);
+                          }
+                        }}
+                        className="h-11 flex-1 rounded-xl bg-rose-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-50"
+                      >{payBusy ? 'Processing…' : 'Yes, process'}</button>
+                      <button
+                        disabled={payBusy}
+                        onClick={async () => {
+                          try {
+                            setPayBusy(true);
+                            const payload = { rentalId: payTarget.id, orderId: `CASH-${payTarget.id}-${Date.now()}`, paymentType: 'cash' };
+                            const res = await api.post('/rentals/settle', payload);
+                            if (res?.status >= 200 && res?.status < 300) {
+                              setRunning((prev) => prev.filter((x) => x.id !== payTarget.id));
+                              setResultMsg('Marked as paid (cash).');
+                              setPayConfirmOpen(false); setPayTarget(null);
+                            } else {
+                              setResultMsg('Failed to mark as paid (cash).');
+                            }
+                          } catch {
+                            setResultMsg('Failed to mark as paid (cash).');
+                          } finally {
+                            setPayBusy(false);
+                          }
+                        }}
+                        className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+                      >Cash</button>
+                      <button
+                        disabled={payBusy}
+                        onClick={() => { if (!payBusy) { setPayConfirmOpen(false); setPayTarget(null); } }}
+                        className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50"
+                      >No</button>
+                    </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
       )}
 
       {/* Credential modal */}
