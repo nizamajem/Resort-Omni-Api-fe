@@ -219,10 +219,11 @@ Detail: ${detail}` : ''}`.trim());
             <div className="mt-4 rounded-xl bg-white p-4 ring-1 ring-slate-200">
               <div className="text-sm font-semibold text-slate-800">Friendly terms</div>
               <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-700">
-                <li>Please install the Reflow app to unlock and use the bike.</li>
-                <li>Only end your ride when you are truly finished. Ending early may prevent re‑unlocking in the same session.</li>
-                <li>Taking a break? Use Pause mode and lock the bike securely (e.g., at a cafe or stop point).</li>
-                <li>Overtime is flexible: if you exceed the rental time, an additional IDR 30,000 applies for each started 30‑minute block. These extra fees are calculated after you return the e‑bike.</li>
+                <li>An internet connection is needed to enjoy the app.</li>
+                <li>Please download and install the Reflow app to unlock and ride your bike.</li>
+                <li>Your rental time begins once your Reflow account is activated.</li>
+                <li>Extra time is flexible — if you ride longer than your rental period, a small additional fee of IDR 30,000 per 30 minutes will apply. These will be calculated only after you finish your ride.</li>
+                <li>Your rental and ride history are safely stored in our system for your convenience</li>
               </ol>
             </div>
 
