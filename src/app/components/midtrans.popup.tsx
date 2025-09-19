@@ -2,13 +2,38 @@
 
 import { useEffect, useRef, useState } from "react";
 
+type MidtransMode = "sandbox" | "production";
+
 type SnapInitOptions = {
   token: string;
+  mode?: MidtransMode;
   onSuccess?: (result: unknown) => void;
   onPending?: (result: unknown) => void;
   onError?: (error: unknown) => void;
   onClose?: () => void;
 };
+
+const SNAP_SCRIPT_ID = "midtrans-snapjs";
+
+const resolveClientKey = (mode: MidtransMode): string => {
+  if (mode === "production") {
+    return (
+      process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY_PRODUCTION ||
+      process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ||
+      ""
+    );
+  }
+  return (
+    process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY_SANDBOX ||
+    process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ||
+    ""
+  );
+};
+
+const resolveScriptSrc = (mode: MidtransMode): string =>
+  mode === "production"
+    ? "https://app.midtrans.com/snap/snap.js"
+    : "https://app.sandbox.midtrans.com/snap/snap.js";
 
 declare global {
   interface Window {
@@ -18,50 +43,62 @@ declare global {
   }
 }
 
-export default function MidtransPopup({ token, onSuccess, onPending, onError, onClose }: SnapInitOptions) {
-  const [ready, setReady] = useState<boolean>(false);
+export default function MidtransPopup({ token, mode, onSuccess, onPending, onError, onClose }: SnapInitOptions) {
+  const resolvedMode: MidtransMode = mode ?? (process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === 'true' ? 'production' : 'sandbox');
+  const [ready, setReady] = useState(false);
   const paidRef = useRef<string | null>(null);
 
-  // Load Snap JS and mark ready when available
   useEffect(() => {
+    const desiredMode = resolvedMode;
     const ensureReady = () => {
-      if (typeof window !== 'undefined' && window.snap && typeof window.snap.pay === 'function') {
+      if (typeof window !== "undefined" && window.snap && typeof window.snap.pay === "function") {
         setReady(true);
       }
     };
 
-    let script = document.getElementById("midtrans-snapjs") as HTMLScriptElement | null;
+    let script = document.getElementById(SNAP_SCRIPT_ID) as HTMLScriptElement | null;
+
+    if (script && script.getAttribute("data-midtrans-mode") !== desiredMode) {
+      script.remove();
+      if (typeof window !== "undefined") {
+        try {
+          window.snap = undefined;
+        } catch {
+          // ignore
+        }
+      }
+      script = null;
+      setReady(false);
+      paidRef.current = null;
+    }
+
     if (!script) {
-      script = document.createElement("script");
-      const isProd = process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === "true";
-      script.id = "midtrans-snapjs";
-      script.src = isProd
-        ? "https://app.midtrans.com/snap/snap.js"
-        : "https://app.sandbox.midtrans.com/snap/snap.js";
-      const clientKey = isProd
-        ? (process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY_PRODUCTION || "")
-        : (process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY_SANDBOX || "");
-      script.setAttribute("data-client-key", clientKey);
-      script.onload = ensureReady;
-      document.body.appendChild(script);
+      const newScript = document.createElement("script");
+      newScript.id = SNAP_SCRIPT_ID;
+      newScript.src = resolveScriptSrc(desiredMode);
+      newScript.setAttribute("data-midtrans-mode", desiredMode);
+      const clientKey = resolveClientKey(desiredMode);
+      if (!clientKey) {
+        console.warn('Midtrans client key missing for mode', desiredMode);
+      }
+      newScript.setAttribute("data-client-key", clientKey);
+      newScript.onload = ensureReady;
+      document.body.appendChild(newScript);
     } else {
-      // If script already present, poll briefly until snap is ready
       ensureReady();
       if (!ready) {
         const id = window.setInterval(() => {
           ensureReady();
           if (window.snap) window.clearInterval(id);
         }, 50);
-        // Safety timeout
         window.setTimeout(() => window.clearInterval(id), 3000);
       }
     }
-  }, [ready]);
+  }, [resolvedMode, ready]);
 
-  // Invoke Snap pay when ready and token provided (once per token)
   useEffect(() => {
     if (!token || !ready) return;
-    if (paidRef.current === token) return; // avoid double-open for same token
+    if (paidRef.current === token) return;
     if (typeof window === 'undefined' || !window.snap?.pay) return;
     paidRef.current = token;
     window.snap.pay(token, {

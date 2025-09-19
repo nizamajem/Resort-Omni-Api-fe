@@ -100,6 +100,13 @@ export default function HistoryPage() {
             orderId: r.orderId || r.order_id,
           }))
         : [];
+      if (list.length > 0) {
+        list.sort((a, b) => {
+          const ta = a.purchasedAt ? new Date(a.purchasedAt).getTime() : 0;
+          const tb = b.purchasedAt ? new Date(b.purchasedAt).getTime() : 0;
+          return tb - ta;
+        });
+      }
       setRows(list);
       // Load rentals (paid only); use absolute API_BASE to avoid misconfigured axios base
       try {
@@ -525,7 +532,7 @@ export default function HistoryPage() {
                       <div className="flex items-center justify-between"><span className="text-slate-600">Order ID</span><span className="font-mono text-slate-900">{orderId}</span></div>
                       <div className="my-2 h-px bg-slate-200" />
                       <div className="flex items-center justify-between"><span className="text-slate-600">Base</span><span className="font-medium text-slate-900">{fmtIDR(r.basePrice)}</span></div>
-                      <div className="flex items-center justify-between"><span className="text-slate-600">Extra time</span><span className="font-medium text-slate-900">{extraMin} min ({blocks} x 30 min)</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-600">Extra time</span><span className="font-medium text-slate-900">{extraMin} min ({blocks} x 60 min)</span></div>
                       <div className="flex items-center justify-between"><span className="text-slate-600">Extra cost</span><span className="font-medium text-slate-900">{fmtIDR(extrasCost)}</span></div>
                       <div className="my-2 h-px bg-slate-200" />
                       <div className="flex items-center justify-between text-base"><span className="font-semibold text-slate-900">Total</span><span className="font-semibold text-slate-900">{fmtIDR(total)}</span></div>

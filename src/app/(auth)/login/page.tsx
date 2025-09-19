@@ -15,12 +15,14 @@ function LoginContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("rememberEmail");
       if (saved) setEmail(saved);
     } catch {}
+    setMounted(true);
   }, []);
 
     const API_BASE = useMemo(() => {
@@ -73,6 +75,9 @@ function LoginContent() {
       setLoading(false);
     }
   }
+
+  // Avoid SSR hydration mismatch by rendering only after mount
+  if (!mounted) return null;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
