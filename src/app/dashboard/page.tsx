@@ -28,7 +28,7 @@ const PAYMENT_CONFIRM_COPY: Record<PaymentOption, string> = {
 
 const EXTRA_HOURLY_RATE = 50000;
 const EXTRA_BLOCK_MINUTES = 60;
-const EXTRA_GRACE_MINUTES = 10;
+const EXTRA_GRACE_MINUTES = 5;
 
 export default function DashboardPage() {
   const makeOrderId = (prefix: string, baseId: string) => {
@@ -351,7 +351,7 @@ const canOrder = (id: Pkg["id"]) => {
         const res = await api.post('/rentals/settle', payload);
         if (res?.status >= 200 && res?.status < 300) {
           setRunning((prev) => prev.filter((x) => x.id !== target.id));
-          setResultMsg('Cash payment recorded.\n\nThank you — the resort receptionist has been notified about this cash payment.');
+          setResultMsg('Cash payment recorded.\n\nThank you ï¿½ the resort receptionist has been notified about this cash payment.');
           setPayConfirmOpen(false);
           setPayTarget(null);
           setSelectedPayment(null);
