@@ -46,8 +46,7 @@ export default function HistoryPage() {
   type DebugLog = { step: string; ok: boolean; status?: number; url?: string; note?: string; payload?: any; response?: any; error?: any };
   const [debug, setDebug] = useState<DebugLog[]>([]);
   const addDebug = (d: DebugLog) => setDebug((prev) => [...prev, d]);
-  const [rentalStatusFilter, setRentalStatusFilter] = useState<'all'|'active'|'unpaid'|'paid'>('all');
-  const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all'|'credit_card'|'qris'|'gopay'|'shopeepay'|'bank_transfer'|'cstore'>('all');
+  // Removed rental status and payment type filters per request
 
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "success" | "failed" | "canceled" | "pending">("all");
@@ -170,15 +169,28 @@ export default function HistoryPage() {
 
   const filteredUnified = useMemo(() => {
     const text = q.toLowerCase();
-    return unified
-      .filter((u) => text ? `${u.guest} ${u.pkg}`.toLowerCase().includes(text) : true)
-      .filter((u) => rentalStatusFilter === 'all' ? true : (u.status === rentalStatusFilter))
-      .filter((u) => {
-        if (paymentTypeFilter === 'all') return true;
-        const m = (u as any).methodDirect as (string|undefined);
-        return m ? m.toLowerCase() === paymentTypeFilter : false;
-      });
-  }, [unified, q, rentalStatusFilter, paymentTypeFilter]);
+    const fromTs = from ? Date.parse(from) : undefined;
+    const toTs = to ? Date.parse(to) + 24*60*60*1000 - 1 : undefined; // inclusive day
+    return unified.filter((u) => {
+      // search across guest, room, package, resort, payment fields
+      const hay = [
+        u.guest,
+        u.pkg,
+        (u as any).raw?.roomNumber,
+        (u as any).raw?.resortName,
+        (u as any).methodDirect,
+        (u as any).methodOrderId,
+        u.status,
+      ]
+        .map((v) => (v ?? "").toString().toLowerCase())
+        .join(" ");
+      if (text && !hay.includes(text)) return false;
+      const start = typeof u.start === 'number' ? u.start : (u.start ? Date.parse(String(u.start)) : undefined);
+      if (fromTs && (start ?? 0) < fromTs) return false;
+      if (toTs && (start ?? 0) > toTs) return false;
+      return true;
+    });
+  }, [unified, q, from, to]);
 
   const total = filteredUnified.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -305,7 +317,7 @@ export default function HistoryPage() {
       </section>
 
       <section className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3">
           <input suppressHydrationWarning
             type="search"
             placeholder="Search guest/email, room, package"
@@ -313,26 +325,11 @@ export default function HistoryPage() {
             onChange={(e) => setQ(e.target.value)}
             className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
           />
-          <select suppressHydrationWarning value={rentalStatusFilter} onChange={(e) => setRentalStatusFilter(e.target.value as any)} className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100">
-            <option value="all">All Rentals</option>
-            <option value="active">Active</option>
-            <option value="unpaid">Unpaid</option>
-            <option value="paid">Paid</option>
-          </select>
           {/* Method filter removed in favor of Midtrans types shown per row */}
           <div className="grid grid-cols-2 gap-3">
             <input suppressHydrationWarning type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
             <input suppressHydrationWarning type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
           </div>
-          <select suppressHydrationWarning value={paymentTypeFilter} onChange={(e) => setPaymentTypeFilter(e.target.value as any)} className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100">
-            <option value="all">All Methods</option>
-            <option value="credit_card">Credit Card</option>
-            <option value="qris">QRIS</option>
-            <option value="gopay">GoPay</option>
-            <option value="shopeepay">ShopeePay</option>
-            <option value="bank_transfer">Bank Transfer</option>
-            <option value="cstore">Convenience Store</option>
-          </select>
         </div>
         <div className="mt-4 flex items-center gap-2">
           <button suppressHydrationWarning onClick={load} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Apply</button>

@@ -20,9 +20,15 @@
   }
 }
 
+
 body {
   /* Use background-color so Tailwind gradient images can layer on top */
   background-color: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Ensure form inputs are readable on white backgrounds in dark mode */
+input, select, textarea {
+  color: #0f172a; /* slate-900 */
 }

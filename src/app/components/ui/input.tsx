@@ -21,7 +21,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           )}
           <input
             ref={ref}
-            className="min-w-0 flex-1 px-3 py-2 outline-none placeholder:text-slate-400"
+            className="min-w-0 flex-1 px-3 py-2 outline-none text-slate-900 placeholder:text-slate-400"
             {...props}
           />
           {suffix && (
@@ -40,4 +40,3 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   }
 );
 Input.displayName = "Input";
-
