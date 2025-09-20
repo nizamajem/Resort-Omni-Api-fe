@@ -1,0 +1,250 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/app/lib/api";
+
+type HistoryRow = {
+  id: string;
+  resortName?: string;
+  userEmail?: string;
+  userPassword?: string;
+  packageName?: string;
+  price?: number;
+  duration?: string;
+  purchasedAt?: string; // ISO string
+  status?: "success" | "failed" | "canceled" | "pending";
+  paymentMethod?: "cash" | "online";
+  orderId?: string;
+};
+
+type RentalRow = {
+  id: string;
+  resortName?: string;
+  guestName: string;
+  roomNumber: string;
+  packageName: string;
+  basePrice: number;
+  baseMinutes: number;
+  startedAt: number;
+  endedAt?: number;
+  status: 'active' | 'unpaid' | 'paid';
+  amountDue?: number;
+};
+
+export default function HistoryPage() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [rentals, setRentals] = useState<RentalRow[]>([]);
+  const [detailRow, setDetailRow] = useState<any | null>(null);
+  const [detailData, setDetailData] = useState<any | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [methodMap, setMethodMap] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
+  const pageSize = 5;
+  const [debugOpen, setDebugOpen] = useState(false);
+  type DebugLog = { step: string; ok: boolean; status?: number; url?: string; note?: string; payload?: any; response?: any; error?: any };
+  const [debug, setDebug] = useState<DebugLog[]>([]);
+  const addDebug = (d: DebugLog) => setDebug((prev) => [...prev, d]);
+  // Removed rental status and payment type filters per request
+
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "success" | "failed" | "canceled" | "pending">("all");
+  const [methodFilter, setMethodFilter] = useState<"all" | "cash" | "online">("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const API_BASE = useMemo(() => {
+    const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
+    if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
+    return "http://localhost:4000/api";
+  }, []);
+
+  const fmtIDR = (n: number) =>
+    new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n || 0);
+  const fmtDate = (iso?: string | number) =>
+    iso ? new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "-";
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    setDebug([]);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const authRaw = typeof window !== 'undefined' ? localStorage.getItem('auth') : null;
+      let resortName = '-';
+      try { const a = authRaw ? JSON.parse(authRaw) : null; resortName = a?.resortName || '-'; } catch {}
+      addDebug({ step: 'auth', ok: !!token, note: `token:${token ? 'present' : 'missing'} resort:${resortName}` });
+      const u = new URL(`${API_BASE}/orders/history`);
+      if (statusFilter !== "all") u.searchParams.set("status", statusFilter);
+      if (methodFilter !== "all") u.searchParams.set("paymentMethod", methodFilter);
+      if (from) u.searchParams.set("from", from);
+      if (to) u.searchParams.set("to", to);
+      const res = await fetch(u.toString(), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      addDebug({ step: 'orders:history', ok: res.ok, status: res.status, url: u.toString() });
+      const data = await res.json().catch(() => null);
+      if (!Array.isArray(data)) addDebug({ step: 'orders:history:parse', ok: false, note: 'non-array response', response: data });
+      const list: HistoryRow[] = Array.isArray(data)
+        ? data.map((r: any) => ({
+            id: r.id,
+            resortName: r.resortName ?? "-",
+            userEmail: r.userEmail ?? "",
+            userPassword: r.userPassword ?? "",
+            packageName: r.packageName ?? r.pkg ?? "-",
+            price: Number(r.price ?? 0),
+            duration: r.duration ?? "",
+            purchasedAt: r.purchasedAt ? new Date(r.purchasedAt).toISOString() : r.createdAt,
+            status: r.status ?? "success",
+            paymentMethod: r.paymentMethod ?? "cash",
+            orderId: r.orderId || r.order_id,
+          }))
+        : [];
+      if (list.length > 0) {
+        list.sort((a, b) => {
+          const ta = a.purchasedAt ? new Date(a.purchasedAt).getTime() : 0;
+          const tb = b.purchasedAt ? new Date(b.purchasedAt).getTime() : 0;
+          return tb - ta;
+        });
+      }
+      setRows(list);
+      // Load rentals (paid only); use absolute API_BASE to avoid misconfigured axios base
+      try {
+        const token2 = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const paidUrl = new URL(`${API_BASE}/rentals/list`);
+        paidUrl.searchParams.set('status', 'paid');
+        const resPaid = await fetch(paidUrl.toString(), { headers: token2 ? { Authorization: `Bearer ${token2}` } : {} });
+        const paid = await resPaid.json().catch(() => null);
+        addDebug({ step: 'rentals:list:paid', ok: resPaid.ok, status: resPaid.status, url: paidUrl.toString(), response: paid });
+        if (Array.isArray(paid) && paid.length > 0) {
+          setRentals(paid);
+        } else {
+          const allUrl = new URL(`${API_BASE}/rentals/list`);
+          allUrl.searchParams.set('status', 'all');
+          const resAll = await fetch(allUrl.toString(), { headers: token2 ? { Authorization: `Bearer ${token2}` } : {} });
+          const anyStatus = await resAll.json().catch(() => null);
+          addDebug({ step: 'rentals:list:all', ok: resAll.ok, status: resAll.status, url: allUrl.toString(), response: anyStatus });
+          setRentals(Array.isArray(anyStatus) ? anyStatus : []);
+        }
+      } catch (err: any) {
+        addDebug({ step: 'rentals:list:error', ok: false, error: err?.message });
+        setRentals([]);
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to load history");
+      addDebug({ step: 'fatal', ok: false, error: e?.message });
+      setRows([]);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [API_BASE]);
+
+
+  const unified = useMemo(() => {
+    const mapped = rentals.map((x) => {
+      const start = x.startedAt; const end = x.endedAt || start;
+      const durSec = Math.max(0, Math.floor((end - start)/1000));
+      const hh = String(Math.floor(durSec/3600)).padStart(2,'0');
+      const mm2 = String(Math.floor((durSec%3600)/60)).padStart(2,'0');
+      const ss2 = String(durSec%60).padStart(2,'0');
+      return ({
+        _type: 'Rental' as const,
+        key: `r-${x.id}`,
+        guest: x.guestName,
+        pkg: x.packageName,
+        start,
+        end,
+        dur: `${hh}:${mm2}:${ss2}`,
+        methodOrderId: (x as any).paymentOrderId as string | undefined,
+        methodDirect: (x as any).paymentType as string | undefined,
+        status: x.status,
+        raw: x,
+      });
+    });
+    return mapped;
+  }, [rentals]);
+
+  const filteredUnified = useMemo(() => {
+    const text = q.toLowerCase();
+    const fromTs = from ? Date.parse(from) : undefined;
+    const toTs = to ? Date.parse(to) + 24*60*60*1000 - 1 : undefined; // inclusive day
+    return unified.filter((u) => {
+      // search across guest, room, package, resort, payment fields
+      const hay = [
+        u.guest,
+        u.pkg,
+        (u as any).raw?.roomNumber,
+        (u as any).raw?.resortName,
+        (u as any).methodDirect,
+        (u as any).methodOrderId,
+        u.status,
+      ]
+        .map((v) => (v ?? "").toString().toLowerCase())
+        .join(" ");
+      if (text && !hay.includes(text)) return false;
+      const start = typeof u.start === 'number' ? u.start : (u.start ? Date.parse(String(u.start)) : undefined);
+      if (fromTs && (start ?? 0) < fromTs) return false;
+      if (toTs && (start ?? 0) > toTs) return false;
+      return true;
+    });
+  }, [unified, q, from, to]);
+
+  const total = filteredUnified.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const start = (page - 1) * pageSize;
+  const end = Math.min(total, start + pageSize);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [q, statusFilter, methodFilter, from, to]);
+
+  const downloadCSV = () => {
+    const header = [
+      'Resort','Guest','Room','Package','Start','End','Duration','Status','Payment'
+    ];
+    const lines = unified.map((u: any) => [
+      u.raw?.resortName || '-',
+      u.guest || '-',
+      u.raw?.roomNumber || '-',
+      u.pkg || '-',
+      typeof u.start === 'number' || typeof u.start === 'string' ? fmtDate(u.start) : '-',
+      typeof u.end === 'number' || typeof u.end === 'string' ? fmtDate(u.end) : '-',
+      u.dur || '-',
+      u.status || '-',
+      (u.methodDirect ? String(u.methodDirect).replace(/_/g,' ').toUpperCase() : (u.methodOrderId ? (methodMap[u.methodOrderId] ? String(methodMap[u.methodOrderId]).replace(/_/g,' ').toUpperCase() : '-') : '-')),
+    ]);
+    const csv = [header, ...lines].map((a) => a.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const StatusPill = ({ s }: { s?: HistoryRow["status"] }) => {
+    const map: Record<string, string> = {
+      success: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      failed: "bg-rose-50 text-rose-700 ring-rose-200",
+      canceled: "bg-amber-50 text-amber-800 ring-amber-200",
+      pending: "bg-slate-100 text-slate-700 ring-slate-200",
+    };
+    const dot = s === "success" ? "bg-emerald-500" : s === "failed" ? "bg-rose-500" : s === "canceled" ? "bg-amber-500" : "bg-slate-500";
+    const label = s ? s[0].toUpperCase() + s.slice(1) : "-";
+    return (
+      <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ring-1 ${map[s || "pending"]}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+        {label}
+      </span>
+    );
+  };
+
+  const MethodPill = ({ orderId }: { orderId?: string }) => {
+    const label = orderId ? (methodMap[orderId] ? String(methodMap[orderId]).replace(/_/g,' ').toUpperCase() : 'CHECKING…') : '-';
+    return <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ring-1 bg-sky-50 text-sky-700 ring-sky-200`}>{label}</span>;
+  };
