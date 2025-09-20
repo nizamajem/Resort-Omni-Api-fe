@@ -53,6 +53,10 @@ export default function NavBar() {
     { href: "/history", label: "History", show: true },
     { href: "/admin/resorts/add", label: "Add Resort", show: role === 'superadmin' },
     { href: "/admin/packages/add", label: "Packages", show: role === 'superadmin' },
+    { href: "/admin/settings/omni", label: "OMNI Settings", show: role === 'superadmin' },
+    { href: "/admin/settings/omni/devices", label: "OMNI View Device", show: role === 'superadmin' },
+    { href: "/admin/settings/omni/callbacks", label: "OMNI Callbacks", show: role === 'superadmin' },
+    { href: "/admin/settings/omni/logs", label: "OMNI Logs", show: role === 'superadmin' },
   ].filter((l) => l.show);
 
   const hideDesktopForSuper = role === 'superadmin' ? 'md:hidden' : '';
