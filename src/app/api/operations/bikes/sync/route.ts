@@ -7,18 +7,13 @@ function getBackendApiBase() {
   return chosen.replace(/\/$/, '') + '/api';
 }
 
-export async function GET(_req: NextRequest) {
-  const url = getBackendApiBase() + '/iot/omni/ping';
-  try {
-    const res = await fetch(url, { cache: 'no-store' });
-    const text = await res.text();
-    return new Response(text || '1', { status: 200, headers: { 'Content-Type': 'text/plain' } });
-  } catch (e: any) {
-    return new Response('0', { status: 500, headers: { 'Content-Type': 'text/plain' } });
-  }
+export async function POST(_req: NextRequest) {
+  const url = getBackendApiBase() + '/iot/omni/bikes/sync';
+  const res = await fetch(url, { method:'POST' });
+  const txt = await res.text();
+  return new Response(txt, { status: res.status, headers: { 'Content-Type': 'application/json' } });
 }
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
-

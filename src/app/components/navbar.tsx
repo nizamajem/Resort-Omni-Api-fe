@@ -14,7 +14,10 @@ export default function NavBar() {
   const [email, setEmail] = useState<string>("");
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [omniOpen, setOmniOpen] = useState(false);
+  const [opsOpen, setOpsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     try {
@@ -31,12 +34,12 @@ export default function NavBar() {
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) { setOmniOpen(false); setOpsOpen(false); }
     };
-    if (menuOpen) document.addEventListener('click', onDocClick);
+    document.addEventListener('click', onDocClick);
     return () => document.removeEventListener('click', onDocClick);
-  }, [menuOpen]);
+  }, []);
 
   // Hide navbar on login/auth pages
   if (pathname && pathname.startsWith("/login")) return null;
@@ -50,13 +53,8 @@ export default function NavBar() {
 
   const links = [
     { href: "/dashboard", label: "Dashboard", show: true },
-    { href: "/history", label: "History", show: true },
-    { href: "/admin/resorts/add", label: "Add Resort", show: role === 'superadmin' },
-    { href: "/admin/packages/add", label: "Packages", show: role === 'superadmin' },
-    { href: "/admin/settings/omni", label: "OMNI Settings", show: role === 'superadmin' },
-    { href: "/admin/settings/omni/devices", label: "OMNI View Device", show: role === 'superadmin' },
-    { href: "/admin/settings/omni/callbacks", label: "OMNI Callbacks", show: role === 'superadmin' },
-    { href: "/admin/settings/omni/logs", label: "OMNI Logs", show: role === 'superadmin' },
+    { href: "/history", label: "Payment History", show: true },
+    { href: "/history/cycling", label: "Cycling History", show: true },
   ].filter((l) => l.show);
 
   const hideDesktopForSuper = role === 'superadmin' ? 'md:hidden' : '';
@@ -70,35 +68,84 @@ export default function NavBar() {
           </div>
           <div className="leading-tight">
             <div className="text-sm font-semibold text-slate-900">Resort Dashboard</div>
-            <div className="text-[11px] text-slate-500 truncate max-w-[12rem]">{resortName || (role === 'superadmin' ? 'Super Admin' : email)}</div>
+            <div className="text-[11px] text-slate-500 truncate max-w-[12rem]">{resortName || (role === 'superadmin' ? 'Gridwiz Side' : email)}</div>
           </div>
         </div>
 
-        <div className="relative" ref={menuRef}>
-          <button
-            onClick={() => setMenuOpen((s) => !s)}
-            className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 shadow-sm active:scale-[0.98]"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-          >
-            <span className="hidden xs:inline">Menu</span>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 8.25h10.5M6.75 12h10.5M6.75 15.75h10.5"/></svg>
-          </button>
-          {menuOpen && (
-            <div role="menu" className="absolute right-0 mt-2 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5">
-              <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500">Navigation</div>
-              {links.map((l) => (
-                <Link key={l.href} href={l.href} onClick={() => setMenuOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">
-                  <span>{l.label}</span>
-                </Link>
-              ))}
-              <div className="my-1 h-px bg-slate-200" />
-              <button onClick={onLogout} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3H6A2.25 2.25 0 0 0 3.75 5.25v13.5A2.25 2.25 0 0 0 6 21h7.5a2.25 2.25 0 0 0 2.25-2.25V15m-6 0 3-3m0 0-3-3m3 3H21"/></svg>
-                Logout
-              </button>
-            </div>
+        <div className="flex items-center gap-2" ref={dropdownRef}>
+          {role === 'superadmin' && (
+            <>
+              <div className="relative">
+                <button
+                  onClick={() => { setOmniOpen((s) => !s); setOpsOpen(false); }}
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-sky-300 bg-white px-3 text-sm font-medium text-sky-700 shadow-sm active:scale-[0.98]"
+                  aria-haspopup="menu"
+                  aria-expanded={omniOpen}
+                >
+                  <span>OMNI API</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6"/></svg>
+                </button>
+                {omniOpen && (
+                  <div role="menu" className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5">
+                    <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500">OMNI</div>
+                    <Link href="/admin/settings/omni" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">OMNI Settings</Link>
+                    <Link href="/admin/settings/omni/ebikes" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">E-bike Control</Link>
+                    <Link href="/admin/settings/omni/devices" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">View Device</Link>
+                    <Link href="/admin/settings/omni/callbacks" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">Callbacks</Link>
+                    <Link href="/admin/settings/omni/logs" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">Logs</Link>
+                  </div>
+                )}
+              </div>
+
+              <div className="relative">
+                <button
+                  onClick={() => { setOpsOpen((s) => !s); setOmniOpen(false); }}
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-emerald-300 bg-white px-3 text-sm font-medium text-emerald-700 shadow-sm active:scale-[0.98]"
+                  aria-haspopup="menu"
+                  aria-expanded={opsOpen}
+                >
+                  <span>Gridwiz Operation</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6"/></svg>
+                </button>
+                {opsOpen && (
+                  <div role="menu" className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5">
+                    <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500">Operation</div>
+                    <Link href="/admin/resorts/add" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">Add Resort</Link>
+                    <Link href="/admin/packages/add" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">Packages</Link>
+                    <Link href="/admin/settings" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">Settings</Link>
+                    <Link href="/admin/operations/bikes" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">Bike List</Link>
+                  </div>
+                )}
+              </div>
+            </>
           )}
+
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen((s) => !s)}
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 shadow-sm active:scale-[0.98]"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              <span className="hidden xs:inline">Menu</span>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 8.25h10.5M6.75 12h10.5M6.75 15.75h10.5"/></svg>
+            </button>
+            {menuOpen && (
+              <div role="menu" className="absolute right-0 mt-2 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5">
+                <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500">Navigation</div>
+                {links.map((l) => (
+                  <Link key={l.href} href={l.href} onClick={() => setMenuOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">
+                    <span>{l.label}</span>
+                  </Link>
+                ))}
+                <div className="my-1 h-px bg-slate-200" />
+                <button onClick={onLogout} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3H6A2.25 2.25 0 0 0 3.75 5.25v13.5A2.25 2.25 0 0 0 6 21h7.5a2.25 2.25 0 0 0 2.25-2.25V15m-6 0 3-3m0 0-3-3m3 3H21"/></svg>
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>

@@ -1,6 +1,10 @@
 import axios from "axios";
 
 function getBase() {
+  // Prefer same-origin proxy in dev to avoid CORS
+  if ((process.env.NEXT_ENABLE_API_PROXY || '').trim() === '1' || process.env.NODE_ENV !== 'production') {
+    return '/api/backend';
+  }
   const rawA = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim();
   const rawB = (process.env.NEXT_PUBLIC_API_URL || "").trim();
   const chosen = rawA || rawB;

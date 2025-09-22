@@ -36,6 +36,7 @@ export default function AdminResortsAddPage() {
   const pageSize = 5;
 
   const API_BASE = useMemo(() => {
+    if ((process.env.NEXT_ENABLE_API_PROXY || '').trim() === '1' || process.env.NODE_ENV !== 'production') return '/api/backend';
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     return "http://localhost:4000/api";
@@ -48,11 +49,13 @@ export default function AdminResortsAddPage() {
     setPassword(out);
   };
 
+  const toAbs = (p: string) => (p.startsWith('http') ? p : (typeof window !== 'undefined' ? window.location.origin + p : p));
+
   const loadResorts = async () => {
     setLoading(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const u = new URL(`${API_BASE}/resorts`);
+      const u = new URL(toAbs(`${API_BASE}/resorts`));
       if (q) u.searchParams.set("q", q);
       if (statusFilter !== "all") u.searchParams.set("status", statusFilter);
       const res = await fetch(u.toString(), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -117,7 +120,7 @@ export default function AdminResortsAddPage() {
   const removeRow = async (row: Resort) => {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const u = new URL(`${API_BASE}/resorts`);
+      const u = new URL(toAbs(`${API_BASE}/resorts`));
       u.searchParams.set("id", row.id);
       const res = await fetch(u.toString(), { method: "DELETE", headers: token ? { Authorization: `Bearer ${token}` } : {} });
       const data = await res.json();

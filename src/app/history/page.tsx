@@ -55,6 +55,7 @@ export default function HistoryPage() {
   const [to, setTo] = useState("");
 
   const API_BASE = useMemo(() => {
+    if ((process.env.NEXT_ENABLE_API_PROXY || '').trim() === '1' || process.env.NODE_ENV !== 'production') return '/api/backend';
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     return "http://localhost:4000/api";
@@ -64,6 +65,8 @@ export default function HistoryPage() {
     new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n || 0);
   const fmtDate = (iso?: string | number) =>
     iso ? new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "-";
+
+  const toAbs = (p: string) => (p.startsWith('http') ? p : (typeof window !== 'undefined' ? window.location.origin + p : p));
 
   const load = async () => {
     setLoading(true);
@@ -75,7 +78,7 @@ export default function HistoryPage() {
       let resortName = '-';
       try { const a = authRaw ? JSON.parse(authRaw) : null; resortName = a?.resortName || '-'; } catch {}
       addDebug({ step: 'auth', ok: !!token, note: `token:${token ? 'present' : 'missing'} resort:${resortName}` });
-      const u = new URL(`${API_BASE}/orders/history`);
+      const u = new URL(toAbs(`${API_BASE}/orders/history`));
       if (statusFilter !== "all") u.searchParams.set("status", statusFilter);
       if (methodFilter !== "all") u.searchParams.set("paymentMethod", methodFilter);
       if (from) u.searchParams.set("from", from);
@@ -110,7 +113,7 @@ export default function HistoryPage() {
       // Load rentals (paid only); use absolute API_BASE to avoid misconfigured axios base
       try {
         const token2 = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-        const paidUrl = new URL(`${API_BASE}/rentals/list`);
+        const paidUrl = new URL(toAbs(`${API_BASE}/rentals/list`));
         paidUrl.searchParams.set('status', 'paid');
         const resPaid = await fetch(paidUrl.toString(), { headers: token2 ? { Authorization: `Bearer ${token2}` } : {} });
         const paid = await resPaid.json().catch(() => null);
@@ -118,7 +121,7 @@ export default function HistoryPage() {
         if (Array.isArray(paid) && paid.length > 0) {
           setRentals(paid);
         } else {
-          const allUrl = new URL(`${API_BASE}/rentals/list`);
+          const allUrl = new URL(toAbs(`${API_BASE}/rentals/list`));
           allUrl.searchParams.set('status', 'all');
           const resAll = await fetch(allUrl.toString(), { headers: token2 ? { Authorization: `Bearer ${token2}` } : {} });
           const anyStatus = await resAll.json().catch(() => null);

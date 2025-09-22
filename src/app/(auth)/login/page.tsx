@@ -25,7 +25,11 @@ function LoginContent() {
     setMounted(true);
   }, []);
 
-    const API_BASE = useMemo(() => {
+  const API_BASE = useMemo(() => {
+    // Prefer same-origin proxy in dev to avoid CORS
+    if ((process.env.NEXT_ENABLE_API_PROXY || '').trim() === '1' || process.env.NODE_ENV !== 'production') {
+      return '/api/backend';
+    }
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     if (typeof window !== "undefined") console.warn("API base URL not set. Falling back to http://localhost:4000/api");

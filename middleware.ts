@@ -14,6 +14,12 @@ const isTenant = (r?: string | null) => r === 'tenant' || r === 'resort';
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  // Proxy Omni callbacks mistakenly sent to FE root to backend API
+  if (pathname === '/' && req.method !== 'GET') {
+    const url = req.nextUrl.clone();
+    url.pathname = '/api/omni/proxy';
+    return NextResponse.rewrite(url);
+  }
 
   // Allow public
   if (isPublic(pathname)) {
@@ -49,4 +55,3 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 };
-

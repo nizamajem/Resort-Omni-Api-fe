@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { Switch } from "@/app/components/ui/switch";
@@ -7,6 +7,7 @@ import { api } from "@/app/lib/api";
 type FeatureConfig = {
   packages: { '1h': boolean; '3h': boolean; '1d': boolean };
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
+  credentialMode?: 'omni' | 'gridwiz';
 };
 
 type ToggleKey = { id: '1h' | '3h' | '1d'; label: string; description: string };
@@ -30,6 +31,8 @@ export default function AdminSettingsPage() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [savingMode, setSavingMode] = useState(false);
+  const [editMode, setEditMode] = useState<'omni' | 'gridwiz' | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -38,7 +41,9 @@ export default function AdminSettingsPage() {
         setMessage(null);
         setError(null);
         const { data } = await api.get('/settings/features');
-        setFeatures((data || null) as FeatureConfig | null);
+        const f = (data || null) as FeatureConfig | null;
+        setFeatures(f);
+        setEditMode((f?.credentialMode as any) === 'gridwiz' ? 'gridwiz' : 'omni');
       } catch {
         setError('Failed to load feature toggles.');
       } finally {
@@ -64,6 +69,24 @@ export default function AdminSettingsPage() {
     }
   };
 
+  const saveCredentialMode = async () => {
+    if (!editMode) return;
+    if (features?.credentialMode === editMode) { setMessage('No changes to save.'); return; }
+    const ok = typeof window !== 'undefined' ? window.confirm(`Simpan perubahan credential mode ke "${editMode}"?`) : true;
+    if (!ok) return;
+    try {
+      setSavingMode(true); setMessage(null); setError(null);
+      const { data } = await api.put('/settings/features', { credentialMode: editMode });
+      const f = (data || null) as FeatureConfig | null;
+      setFeatures(f);
+      setEditMode((f?.credentialMode as any) === 'gridwiz' ? 'gridwiz' : 'omni');
+      setMessage('Credential mode updated.');
+    } catch (e: any) {
+      setError('Failed to update credential mode. Pastikan Anda login sebagai superadmin.');
+    }
+    finally { setSavingMode(false); }
+  };
+
   return (
     <main className="space-y-8 px-4 pb-10 pt-6">
       <header className="flex flex-col gap-2">
@@ -81,12 +104,28 @@ export default function AdminSettingsPage() {
       <section className="grid gap-6">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">Credential Mode</h2>
+            <p className="text-sm text-slate-600">Pilih 1 mode: Omni App (email+password) atau Gridwiz App (kode unik).</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 items-center">
+            <button onClick={()=>setEditMode('omni')} disabled={savingMode} className={`rounded-xl px-4 py-3 text-sm ring-1 ${editMode !== 'gridwiz' ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-white text-slate-800 ring-slate-200'}`}>Omni App (Email + Password)</button>
+            <button onClick={()=>setEditMode('gridwiz')} disabled={savingMode} className={`rounded-xl px-4 py-3 text-sm ring-1 ${editMode === 'gridwiz' ? 'bg-sky-50 text-sky-800 ring-sky-200' : 'bg-white text-slate-800 ring-slate-200'}`}>Gridwiz App (Kode Unik)</button>
+            <div className="flex justify-end">
+              <button onClick={saveCredentialMode} disabled={savingMode || !editMode || editMode === (features?.credentialMode || 'omni')} className={`rounded-xl px-4 py-3 text-sm font-medium ${savingMode || !editMode || editMode === (features?.credentialMode || 'omni') ? 'bg-slate-200 text-slate-500' : 'bg-emerald-600 text-white hover:bg-emerald-700'} `}>{savingMode ? 'Saving...' : 'Save'}</button>
+            </div>
+          </div>
+          {editMode === 'gridwiz' && (
+            <div className="mt-2 text-xs text-slate-600">Saat resort melakukan order, sistem akan membuat kode login dan User ID acak.</div>
+          )}
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4">
             <h2 className="text-lg font-semibold text-slate-900">Packages</h2>
             <p className="text-sm text-slate-600">Toggle which rental packages partners can see and purchase.</p>
           </div>
           <div className="space-y-4">
             {PACKAGE_OPTIONS.map((pkg) => {
-              const checked = features ? !!features.packages[pkg.id] : true;
+              const checked = features?.packages?.[pkg.id] ?? true;
               const busy = savingKey === `packages:${pkg.id}`;
               return (
                 <div key={pkg.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -112,7 +151,7 @@ export default function AdminSettingsPage() {
           </div>
           <div className="space-y-4">
             {PAYMENT_OPTIONS.map((pay) => {
-              const checked = features ? !!features.payments[pay.id] : true;
+              const checked = features?.payments?.[pay.id] ?? true;
               const busy = savingKey === `payments:${pay.id}`;
               return (
                 <div key={pay.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -138,3 +177,4 @@ export default function AdminSettingsPage() {
     </main>
   );
 }
+

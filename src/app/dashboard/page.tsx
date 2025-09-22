@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import MidtransPopup from "@/app/components/midtrans.popup";
@@ -9,6 +9,7 @@ type Pkg = { id: "1h" | "3h" | "1d"; title: string; desc: string; price: number;
 type FeatureConfig = {
   packages: { '1h': boolean; '3h': boolean; '1d': boolean };
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
+  credentialMode?: 'omni' | 'gridwiz';
 };
 
 type PaymentOption = 'cash' | 'midtransSandbox' | 'midtransProduction';
@@ -54,9 +55,9 @@ export default function DashboardPage() {
     return basePackages.filter((pkg) => features.packages?.[pkg.id] !== false);
   }, [basePackages, features]);
 
-  const cashEnabled = features ? !!features.payments.cash : true;
-  const sandboxEnabled = features ? !!features.payments.midtransSandbox : true;
-  const productionEnabled = features ? !!features.payments.midtransProduction : true;
+  const cashEnabled = features?.payments?.cash ?? true;
+  const sandboxEnabled = features?.payments?.midtransSandbox ?? true;
+  const productionEnabled = features?.payments?.midtransProduction ?? true;
   const availablePayments = useMemo<PaymentOption[]>(() => {
     const entries: PaymentOption[] = [];
     if (cashEnabled) entries.push('cash');
@@ -83,6 +84,7 @@ export default function DashboardPage() {
   const [resultMsg, setResultMsg] = useState<string | null>(null);
   const [lastOrderId, setLastOrderId] = useState<string | null>(null);
   const [cred, setCred] = useState<{ email: string; password: string } | null>(null);
+  const [gridCred, setGridCred] = useState<{ code: string; userId: string } | null>(null);
   const [availability, setAvailability] = useState<{ '1h': number; '3h': number; '1d': number; enabled?: Record<'1h' | '3h' | '1d', boolean> } | null>(null);
   const [nowTick, setNowTick] = useState(0);
   const [loadedLocal, setLoadedLocal] = useState(false);
@@ -110,6 +112,7 @@ export default function DashboardPage() {
 
   // Backend base URL
   const API_BASE = useMemo(() => {
+    if ((process.env.NEXT_ENABLE_API_PROXY || '').trim() === '1' || process.env.NODE_ENV !== 'production') return '/api/backend';
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     return "http://localhost:4000/api";
@@ -217,6 +220,9 @@ export default function DashboardPage() {
     }
   }, [availablePayments, selectedPayment]);
 const canOrder = (id: Pkg["id"]) => {
+    // Gridwiz mode: always allow ordering (kode login), ignore payment toggles
+    if (features?.credentialMode === 'gridwiz') return true;
+    // Omni mode: need at least one payment method and available account
     if (!hasAnyPayment) return false;
     if (features && features.packages && features.packages[id] === false) return false;
     if (availability?.enabled && availability.enabled[id] === false) return false;
@@ -268,7 +274,15 @@ const canOrder = (id: Pkg["id"]) => {
         setResultMsg(((data as any)?.error) || "Failed to record cash order.");
       } else {
         const c = (data as any)?.credential;
-        if (c?.email && c?.password) {
+        if (c?.mode === 'gridwiz' && c?.code && c?.userId) {
+          setGridCred({ code: c.code, userId: c.userId });
+          try {
+            const rent = (data as any)?.rental;
+            if (rent && rent.id) { setRunning((prev) => ([...prev, rent])); setResultMsg('Rental started. Gridwiz code ready.'); return; }
+            const { data: r } = await api.post('/rentals/start', { pkg: orderFor.id, packageName: orderFor.title, price: orderFor.price, duration: orderFor.unit, guestName, roomNumber, resortName: resortName || undefined });
+            if (r && r.id) { setRunning((prev) => ([...prev, r])); setResultMsg('Rental started. Gridwiz code ready.'); }
+          } catch {}
+        } else if (c?.email && c?.password) {
           setCred({ email: c.email, password: c.password });
           // Create server-side rental (or use rental returned by /orders/cash)
           try {
@@ -351,7 +365,7 @@ const canOrder = (id: Pkg["id"]) => {
         const res = await api.post('/rentals/settle', payload);
         if (res?.status >= 200 && res?.status < 300) {
           setRunning((prev) => prev.filter((x) => x.id !== target.id));
-          setResultMsg('Cash payment recorded.\n\nThank you � the resort receptionist has been notified about this cash payment.');
+          setResultMsg('Cash payment recorded. Thank you — the resort receptionist has been notified about this cash payment.');
           setPayConfirmOpen(false);
           setPayTarget(null);
           setSelectedPayment(null);
@@ -907,6 +921,37 @@ const canOrder = (id: Pkg["id"]) => {
         </div>
       )}
 
+      {/* Gridwiz code modal */}
+      {gridCred && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setGridCred(null)} />
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-lg bg-sky-50 text-sky-700 ring-1 ring-sky-200">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5h18M3 12h18M3 16.5h18"/></svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Gridwiz Login Code</h3>
+            </div>
+            <p className="text-sm text-slate-600">Berikan kode ini ke tamu. Mereka bisa masuk di halaman Gridwiz menggunakan kode di bawah, lalu masukkan nomor sepeda untuk unlock.</p>
+            <div className="mt-4 space-y-3">
+              <div className="text-xs font-medium text-slate-600">Kode</div>
+              <div className="flex items-center justify-between rounded-xl border border-slate-300 bg-white px-3 py-3 text-lg font-mono tracking-widest ring-1 ring-slate-200">
+                <span>{gridCred.code}</span>
+                <button onClick={() => navigator.clipboard.writeText(gridCred.code)} className="rounded-lg border px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-50">Copy</button>
+              </div>
+              <div className="text-xs text-slate-500">User ID: <span className="font-mono">{gridCred.userId}</span></div>
+            </div>
+            <div className="mt-4 rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800 ring-1 ring-emerald-200">
+              Halaman login Gridwiz: <a className="underline" href="/gridwiz" target="_blank">/gridwiz</a>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <a href="/gridwiz" target="_blank" className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-center leading-[44px] text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Buka Halaman Gridwiz</a>
+              <button onClick={() => setGridCred(null)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {processing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/20">
           <div className="rounded-xl bg-white px-6 py-4 shadow ring-1 ring-slate-200">
@@ -922,6 +967,8 @@ const canOrder = (id: Pkg["id"]) => {
     </div>
   );
 }
+
+
 
 
 
