@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import MidtransPopup from "@/app/components/midtrans.popup";
@@ -9,37 +9,50 @@ type Pkg = { id: "1h" | "3h" | "1d"; title: string; desc: string; price: number;
 type FeatureConfig = {
   packages: { '1h': boolean; '3h': boolean; '1d': boolean };
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
-  credentialMode?: 'omni' | 'gridwiz';
 };
 
 type PaymentOption = 'cash' | 'midtransSandbox' | 'midtransProduction';
 type OnlinePaymentOption = Exclude<PaymentOption, 'cash'>;
 
+// ----------------------
+// Move type BEFORE usage
+// ----------------------
+type RunningRental = {
+  id: string;
+  guestName: string;
+  roomNumber: string;
+  pkg: Pkg["id"];
+  packageName: string;
+  basePrice: number;
+  baseMinutes: number;
+  startedAt: number;
+  endedAt?: number;
+  status: 'active' | 'unpaid';
+  amountDue?: number;
+};
+
 const PAYMENT_LABELS: Record<PaymentOption, string> = {
   cash: 'Cash',
-  midtransSandbox: 'Midtrans Sandbox (Test)',
-  midtransProduction: 'Midtrans Production (Live)',
+  midtransSandbox: 'Online Payment (Midtrans Sandbox)',
+  midtransProduction: 'Online Payment (Midtrans Production)',
 };
 
 const PAYMENT_CONFIRM_COPY: Record<PaymentOption, string> = {
-  cash: 'Record this order as a cash payment?',
-  midtransSandbox: 'Open Midtrans sandbox checkout (QRIS and test wallets).',
-  midtransProduction: 'Open Midtrans production checkout for a live payment.',
+  cash: 'Process cash payment now? This will be recorded in the system.',
+  midtransSandbox: 'Process online payment via Midtrans Sandbox now?',
+  midtransProduction: 'Process online payment via Midtrans Production now?',
 };
 
-const EXTRA_HOURLY_RATE = 50000;
+const EXTRA_HOURLY_RATE = 50_000;
 const EXTRA_BLOCK_MINUTES = 60;
-const EXTRA_GRACE_MINUTES = 10;
+const EXTRA_GRACE_MINUTES = 5;
+
+// Fix server/client date formatting by pinning the time zone:
+const LOCALE = "id-ID";
+const TZ_OPTS: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Makassar" };
 
 export default function DashboardPage() {
-  const makeOrderId = (prefix: string, baseId: string) => {
-    const cleanBase = baseId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    const timePart = Date.now().toString(36).toUpperCase();
-    const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase();
-    const suffix = cleanBase.slice(-6);
-    const raw = `${prefix}${timePart}${randomPart}${suffix}`;
-    return raw.slice(0, 48);
-  };
+  // -------- Stable packages ----------
   const basePackages = useMemo<Pkg[]>(
     () => [
       { id: "1h", title: "1 Hour", desc: "Perfect for short city rides.", price: 50000, unit: "hour" },
@@ -48,16 +61,19 @@ export default function DashboardPage() {
     ],
     []
   );
+
   const [features, setFeatures] = useState<FeatureConfig | null>(null);
+  const [featuresLoading, setFeaturesLoading] = useState(false);
 
   const packages = useMemo(() => {
     if (!features) return basePackages;
     return basePackages.filter((pkg) => features.packages?.[pkg.id] !== false);
   }, [basePackages, features]);
 
-  const cashEnabled = features?.payments?.cash ?? true;
-  const sandboxEnabled = features?.payments?.midtransSandbox ?? true;
-  const productionEnabled = features?.payments?.midtransProduction ?? true;
+  const cashEnabled = features ? !!features.payments.cash : true;
+  const sandboxEnabled = features ? !!features.payments.midtransSandbox : true;
+  const productionEnabled = features ? !!features.payments.midtransProduction : true;
+
   const availablePayments = useMemo<PaymentOption[]>(() => {
     const entries: PaymentOption[] = [];
     if (cashEnabled) entries.push('cash');
@@ -65,14 +81,15 @@ export default function DashboardPage() {
     if (productionEnabled) entries.push('midtransProduction');
     return entries;
   }, [cashEnabled, sandboxEnabled, productionEnabled]);
+
   const hasAnyPayment = availablePayments.length > 0;
 
+  // -------- UI states ----------
   const [detailFor, setDetailFor] = useState<Pkg | null>(null);
   const [orderFor, setOrderFor] = useState<Pkg | null>(null);
   const [guestInfoOpen, setGuestInfoOpen] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [roomNumber, setRoomNumber] = useState("");
-  // initial payment modals removed; payment only on Pay Now
   const [confirmCashOpen, setConfirmCashOpen] = useState(false);
   const [agreeChecked, setAgreeChecked] = useState(false);
   const [openPrivacy, setOpenPrivacy] = useState(false);
@@ -82,48 +99,40 @@ export default function DashboardPage() {
   const [snapContext, setSnapContext] = useState<{ mode: 'extras'; rentalId?: string; amount?: number; paymentMode?: OnlinePaymentOption } | null>(null);
   const [processing, setProcessing] = useState(false);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
-  const [lastOrderId, setLastOrderId] = useState<string | null>(null);
   const [cred, setCred] = useState<{ email: string; password: string } | null>(null);
-  const [gridCred, setGridCred] = useState<{ code: string; userId: string } | null>(null);
   const [availability, setAvailability] = useState<{ '1h': number; '3h': number; '1d': number; enabled?: Record<'1h' | '3h' | '1d', boolean> } | null>(null);
-  const [nowTick, setNowTick] = useState(0);
-  const [loadedLocal, setLoadedLocal] = useState(false);
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
   const [endTarget, setEndTarget] = useState<RunningRental | null>(null);
   const [payConfirmOpen, setPayConfirmOpen] = useState(false);
   const [payTarget, setPayTarget] = useState<RunningRental | null>(null);
   const [payBusy, setPayBusy] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<PaymentOption | null>(null);
-
-  type RunningRental = {
-    id: string;
-    guestName: string;
-    roomNumber: string;
-    pkg: Pkg["id"];
-    packageName: string;
-    basePrice: number;
-    baseMinutes: number;
-    startedAt: number;
-    endedAt?: number;
-    status: 'active' | 'unpaid';
-    amountDue?: number;
-  };
   const [running, setRunning] = useState<RunningRental[]>([]);
 
-  // Backend base URL
+  // -------- API base (kept stable) ----------
   const API_BASE = useMemo(() => {
-    if ((process.env.NEXT_ENABLE_API_PROXY || '').trim() === '1' || process.env.NODE_ENV !== 'production') return '/api/backend';
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     return "http://localhost:4000/api";
   }, []);
 
-  // Auth info (token + resort name)
+  // -------- Auth info ----------
   const [token, setToken] = useState<string | null>(null);
   const [resortName, setResortName] = useState<string>("");
   const [userEmail, setUserEmail] = useState<string>("");
 
-  // Prefer localStorage token; fallback to cookie if present
+  // -------- Client-only mounted clock to avoid hydration mismatch ----------
+  const [mounted, setMounted] = useState(false);
+  const [nowMs, setNowMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs((t) => (t ? t + 1000 : Date.now())), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // -------- Token helpers ----------
   const readToken = () => {
     try {
       const ls = localStorage.getItem("token");
@@ -142,75 +151,77 @@ export default function DashboardPage() {
       const auth = raw ? JSON.parse(raw) : null;
       setResortName(auth?.resortName || "");
       setUserEmail(auth?.email || "");
-    } catch {}
+    } catch { /**/ }
 
     const onStorage = () => setToken(readToken());
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
+  // -------- Features ----------
   useEffect(() => {
     if (!token) {
       setFeatures(null);
       return;
     }
     const load = async () => {
+      setFeaturesLoading(true);
       try {
         const { data } = await api.get("/settings/features");
         setFeatures((data || null) as FeatureConfig | null);
       } catch {
         setFeatures(null);
+      } finally {
+        setFeaturesLoading(false);
       }
     };
     load();
   }, [token]);
 
-  // Fetch availability of active accounts per package
+  // -------- Availability ----------
   useEffect(() => {
     if (!token) return;
     const run = async () => {
       try {
-        const { data } = await api.get("/orders/availability"); setAvailability(data as any);
-      } catch {}
+        const { data } = await api.get("/orders/availability");
+        setAvailability(data as any);
+      } catch { /**/ }
     };
     run();
   }, [API_BASE, token]);
-  // Load running rentals from localStorage
+
+  // -------- Running rentals: local load/save ----------
+  const [loadedLocal, setLoadedLocal] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem('runningRentals');
       if (raw) setRunning(JSON.parse(raw));
-    } catch {}
+    } catch { /**/ }
     setLoadedLocal(true);
   }, []);
-  // Persist running rentals (skip initial mount until local loaded)
   useEffect(() => {
     if (!loadedLocal) return;
-    try { localStorage.setItem('runningRentals', JSON.stringify(running)); } catch {}
+    try { localStorage.setItem('runningRentals', JSON.stringify(running)); } catch { /**/ }
   }, [running, loadedLocal]);
-  // Load running rentals from server when logged in
+
+  // -------- Load server rentals ----------
   useEffect(() => {
     const loadServer = async () => {
       if (!token) return;
       try {
         const { data } = await api.get('/rentals/list');
         if (Array.isArray(data)) {
-          // Always replace server-backed items with server response,
-          // but keep client-only (temporary RUN-*) rows.
           setRunning((prev) => {
             const clientOnly = prev.filter((r: any) => String(r.id || '').startsWith('RUN-'));
             return [...(data as any[]), ...clientOnly];
           });
         }
-      } catch {}
+      } catch { /**/ }
     };
     loadServer();
   }, [token]);
-  // Timer tick
-  useEffect(() => {
-    const id = setInterval(() => setNowTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+
+  // -------- Payment method selection sync ----------
   useEffect(() => {
     if (!payConfirmOpen) setSelectedPayment(null);
   }, [payConfirmOpen]);
@@ -219,10 +230,9 @@ export default function DashboardPage() {
       setSelectedPayment(null);
     }
   }, [availablePayments, selectedPayment]);
-const canOrder = (id: Pkg["id"]) => {
-    // Gridwiz mode: always allow ordering (kode login), ignore payment toggles
-    if (features?.credentialMode === 'gridwiz') return true;
-    // Omni mode: need at least one payment method and available account
+
+  // -------- Helpers ----------
+  const canOrder = (id: Pkg["id"]) => {
     if (!hasAnyPayment) return false;
     if (features && features.packages && features.packages[id] === false) return false;
     if (availability?.enabled && availability.enabled[id] === false) return false;
@@ -230,13 +240,10 @@ const canOrder = (id: Pkg["id"]) => {
     return (availability[id] || 0) > 0;
   };
 
-  
+  const fmt = (n: number) =>
+    new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 
-  const fmt = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
-
-  const onDetail = (p: Pkg) => {
-    setDetailFor(p);
-  };
+  const onDetail = (p: Pkg) => setDetailFor(p);
 
   const onOrder = (p: Pkg) => {
     if (!hasAnyPayment) {
@@ -274,17 +281,8 @@ const canOrder = (id: Pkg["id"]) => {
         setResultMsg(((data as any)?.error) || "Failed to record cash order.");
       } else {
         const c = (data as any)?.credential;
-        if (c?.mode === 'gridwiz' && c?.code && c?.userId) {
-          setGridCred({ code: c.code, userId: c.userId });
-          try {
-            const rent = (data as any)?.rental;
-            if (rent && rent.id) { setRunning((prev) => ([...prev, rent])); setResultMsg('Rental started. Gridwiz code ready.'); return; }
-            const { data: r } = await api.post('/rentals/start', { pkg: orderFor.id, packageName: orderFor.title, price: orderFor.price, duration: orderFor.unit, guestName, roomNumber, resortName: resortName || undefined });
-            if (r && r.id) { setRunning((prev) => ([...prev, r])); setResultMsg('Rental started. Gridwiz code ready.'); }
-          } catch {}
-        } else if (c?.email && c?.password) {
+        if (c?.email && c?.password) {
           setCred({ email: c.email, password: c.password });
-          // Create server-side rental (or use rental returned by /orders/cash)
           try {
             const rent = (data as any)?.rental;
             if (rent && rent.id) {
@@ -308,12 +306,12 @@ const canOrder = (id: Pkg["id"]) => {
               setResultMsg('Rental start did not return an id. Please check backend.');
               throw new Error('no_rental');
             }
-          } catch (e: any) {
-            // fallback to local so UI shows immediately, and inform user
+          } catch {
             const baseMinutes = orderFor.id === '1h' ? 60 : orderFor.id === '3h' ? 180 : 1440;
             setRunning((prev) => ([
               ...prev,
-              { id: `RUN-${Date.now()}`,
+              {
+                id: `RUN-${Date.now()}`, // this is fine as it’s not rendered until mounted
                 guestName: guestName || 'Guest',
                 roomNumber: roomNumber || '-',
                 pkg: orderFor.id,
@@ -321,7 +319,8 @@ const canOrder = (id: Pkg["id"]) => {
                 basePrice: orderFor.price,
                 baseMinutes,
                 startedAt: Date.now(),
-                status: 'active' } as any,
+                status: 'active'
+              } as RunningRental,
             ]));
             setResultMsg('Rental started locally (server start failed). Please verify backend /rentals/start.');
           }
@@ -336,13 +335,13 @@ const canOrder = (id: Pkg["id"]) => {
     }
   };
 
-  // Online payment is now only triggered from Pay Now on unpaid rows
-
-  // Pay button for unpaid rentals
-  function PayUnpaidBtn({ rental, onOpen }: { rental: any; onOpen: (r: any) => void }) {
+  // -------- Pay button --------
+  function PayUnpaidBtn({ rental, onOpen }: { rental: RunningRental; onOpen: (r: RunningRental) => void }) {
     if (!hasAnyPayment) {
       return (
-        <span className="inline-flex items-center rounded-lg bg-slate-200 px-3 py-2 text-xs font-medium text-slate-500">Payment method disabled</span>
+        <span className="inline-flex items-center rounded-lg bg-slate-200 px-3 py-2 text-xs font-medium text-slate-500">
+          Payment method disabled
+        </span>
       );
     }
     return (
@@ -355,26 +354,111 @@ const canOrder = (id: Pkg["id"]) => {
     );
   }
 
+  // -------- Legal content (static) --------
+  function AgreementContent() {
+    return (
+      <div className="space-y-3 text-sm leading-relaxed text-slate-700">
+        <p>
+          Welcome to Re:Flow! By using our service, you agree to ride safely, follow local
+          rules, and treat the bike with care. If something looks off, please report it to
+          the resort or our support team.
+        </p>
+
+        <h4 className="font-semibold text-slate-900">Friendly terms</h4>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>An internet connection is needed to enjoy the app.</li>
+          <li>Please download and install the Reflow app to unlock and ride your bike.</li>
+          <li>Your rental time begins once your Reflow account is activated.</li>
+          <li>
+            If you go beyond your rental period, an extra <span className="font-medium">IDR 50,000</span> will be
+            added automatically for each additional hour.
+          </li>
+          <li>Your rental and ride history are safely stored in our system for your convenience.</li>
+        </ul>
+
+        <h4 className="font-semibold text-slate-900">Usage & responsibilities</h4>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>Only the account holder may ride the bike unlocked with their account.</li>
+          <li>Return the bike to an approved area and end the ride in the app to stop billing.</li>
+          <li>You’re responsible for any damage or loss caused by misuse or negligence.</li>
+          <li>Fees and charges are shown in the app before you ride; overtime is billed automatically per hour.</li>
+        </ul>
+
+        <h4 className="font-semibold text-slate-900">Payments & receipts</h4>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>Available payment options may include cash (via resort) or online payment.</li>
+          <li>Receipts and history are available in the app and can be shared with the resort on request.</li>
+        </ul>
+
+        <p className="text-slate-600">
+          Once you agree and proceed, your actions (e.g., unlocks, ride start/end, payments) are
+          <span className="font-medium"> recorded in our system</span> for security, billing, and support.
+        </p>
+      </div>
+    );
+  }
+
+  function PrivacyContent() {
+    return (
+      <div className="space-y-3 text-sm leading-relaxed text-slate-700">
+        <p>
+          We care about your privacy. We collect only the data needed to provide and improve
+          your riding experience.
+        </p>
+
+        <h4 className="font-semibold text-slate-900">What we collect</h4>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>Account details (e.g., name, email) to create and manage your account.</li>
+          <li>Ride and rental information (start/end time, location zones, fees) to operate the service.</li>
+          <li>
+            Optional resort details (guest name, room number) to help with identification, billing, and
+            resort operations.
+          </li>
+        </ul>
+
+        <h4 className="font-semibold text-slate-900">How we use it</h4>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>To unlock bikes, calculate time and fees (including overtime), and show your ride history.</li>
+          <li>To provide support and resolve issues with your rentals or payments.</li>
+          <li>To keep the service secure and prevent fraud or misuse.</li>
+        </ul>
+
+        <h4 className="font-semibold text-slate-900">How we protect it</h4>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>We store data securely and limit access to authorized personnel only.</li>
+          <li>We do not sell your personal data.</li>
+          <li>
+            We may share data with resort partners solely for check-in/out verification and billing support.
+          </li>
+        </ul>
+
+        <p className="text-slate-600">
+          You can request to view or delete your data as allowed by applicable laws. For the full privacy
+          notice, please contact the administrator or visit our legal page.
+        </p>
+      </div>
+    );
+  }
+
+  // -------- Payment handler --------
   const handleConfirmPayment = async (method: PaymentOption, totalAmount: number) => {
     if (!payTarget) return;
     const target = payTarget;
     if (method === 'cash') {
       try {
         setPayBusy(true);
-        const payload = { rentalId: target.id, orderId: makeOrderId('CASH', target.id), paymentType: 'cash' };
+        const payload = { rentalId: target.id, orderId: `CASH-${target.id}-${Date.now()}`, paymentType: 'cash' };
         const res = await api.post('/rentals/settle', payload);
         if (res?.status >= 200 && res?.status < 300) {
           setRunning((prev) => prev.filter((x) => x.id !== target.id));
-          setResultMsg('Cash payment recorded. Thank you — the resort receptionist has been notified about this cash payment.');
+          setResultMsg('Cash payment recorded. Thank you for using our rental service.');
           setPayConfirmOpen(false);
           setPayTarget(null);
           setSelectedPayment(null);
         } else {
           setResultMsg('Failed to mark cash payment.');
         }
-      } catch (err: any) {
-        console.error('cash settle error', err);
-        const detail = err?.response?.data ? JSON.stringify(err.response.data) : err?.message || 'Unknown error';
+      } catch {
         setResultMsg('Failed to mark cash payment.');
       } finally {
         setPayBusy(false);
@@ -384,7 +468,7 @@ const canOrder = (id: Pkg["id"]) => {
 
     try {
       setPayBusy(true);
-      const orderId = makeOrderId('RENT', target.id);
+      const orderId = `RENTAL-${target.id}-${Date.now()}`;
       const amount = Number(target.amountDue ?? totalAmount ?? 0);
       const mode = method === 'midtransProduction' ? 'production' : 'sandbox';
       const resp = await api.post('/payments/snap-token', {
@@ -396,9 +480,7 @@ const canOrder = (id: Pkg["id"]) => {
       });
       const token = resp?.data?.token;
       if (!token) {
-        const detailSource = resp?.data?.error || resp?.data?.detail || resp?.data;
-        const detailText = detailSource ? (typeof detailSource === 'string' ? detailSource : JSON.stringify(detailSource)) : '';
-        setResultMsg(detailText ? `Failed to start online payment. Detail: ${detailText}` : 'Failed to start online payment.');
+        setResultMsg('Failed to start online payment.');
         return;
       }
       const paymentMode: OnlinePaymentOption = mode === 'production' ? 'midtransProduction' : 'midtransSandbox';
@@ -408,34 +490,31 @@ const canOrder = (id: Pkg["id"]) => {
       setSnapContext({ mode: 'extras', rentalId: target.id, amount, paymentMode });
       setSnapToken(token);
       setSnapOpen(true);
-    } catch (err: any) {
-      console.error('snap-token error', err);
-      const detail = err?.response?.data ? JSON.stringify(err.response.data) : err?.message || 'Unknown error';
-      const message = err?.response?.data?.error || err?.message;
-      setResultMsg(`Failed to start online payment${message ? `: ${message}` : '.'}`);
+    } catch {
+      setResultMsg('Failed to start online payment.');
     } finally {
       setPayBusy(false);
     }
   };
 
+  // -------- Render ----------
   return (
     <div className="space-y-6">
       <section className="rounded-2xl bg-gradient-to-tr from-sky-50 to-emerald-50 p-[1px] shadow-sm">
         <div className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200">
-        <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z"/></svg>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z" /></svg>
+            </div>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
+              <p className="text-sm text-slate-600">Choose a package and complete checkout with cash or online payment.</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
-            <p className="text-sm text-slate-600">Choose a package and complete checkout with cash or online payment.</p>
-          </div>
-        </div>
         </div>
       </section>
 
-      
-      {features && !hasAnyPayment && (
+      {!featuresLoading && features && !hasAnyPayment && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           All payment methods are disabled. Please contact the super admin.
         </div>
@@ -461,7 +540,7 @@ const canOrder = (id: Pkg["id"]) => {
                   <p className="mt-1 text-sm text-slate-600">{p.desc}</p>
                 </div>
                 <div className="h-10 w-10 grid place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 19.5l3-9h4.5m0 0L18 6h-3m1.5 4.5 3 3"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 19.5l3-9h4.5m0 0L18 6h-3m1.5 4.5 3 3" /></svg>
                 </div>
               </div>
               <div className="mt-4 flex items-baseline gap-2">
@@ -520,7 +599,6 @@ const canOrder = (id: Pkg["id"]) => {
               </ol>
             </div>
 
-
             <div className="mt-4 text-slate-700">Price: <span className="font-semibold">{fmt(detailFor.price)}</span> / {detailFor.unit}</div>
             <div className="mt-6 flex gap-3">
               <button onClick={() => setDetailFor(null)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Close</button>
@@ -539,13 +617,42 @@ const canOrder = (id: Pkg["id"]) => {
             <p className="mt-1 text-sm text-slate-600">Please input guest name and room number for this order.</p>
             <div className="mt-4 space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name</label>
-                <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="e.g. John Doe" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200 focus:border-sky-500 focus:ring-sky-100" />
+                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Guest Name
+                </label>
+                <input
+                  value={guestName}
+                  onChange={(e) => setGuestName(e.target.value)}
+                  placeholder="e.g. John Doe"
+                  className="w-full rounded-xl border border-slate-300 
+               bg-white dark:bg-slate-800 
+               px-3 py-2 text-sm 
+               text-black dark:text-white
+               placeholder-slate-400 dark:placeholder-slate-500
+               outline-none ring-1 ring-slate-200 
+               focus:border-sky-500 focus:ring-sky-100"
+                />
               </div>
+
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Room Number</label>
-                <input value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 203" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200 focus:border-sky-500 focus:ring-sky-100" />
+                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Room Number
+                </label>
+                <input
+                  value={roomNumber}
+                  onChange={(e) => setRoomNumber(e.target.value)}
+                  placeholder="e.g. 203"
+                  className="w-full rounded-xl border border-slate-300 
+               bg-white dark:bg-slate-800 
+               px-3 py-2 text-sm 
+               text-black dark:text-white
+               placeholder-slate-400 dark:placeholder-slate-500
+               outline-none ring-1 ring-slate-200 
+               focus:border-sky-500 focus:ring-sky-100"
+                />
               </div>
+
+
             </div>
             <div className="mt-5 flex gap-3">
               <button onClick={() => setGuestInfoOpen(false)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Cancel</button>
@@ -579,21 +686,35 @@ const canOrder = (id: Pkg["id"]) => {
         </div>
       )}
 
-      
-
       {/* Legal modals */}
       {(openPrivacy || openAgreement) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setOpenPrivacy(false); setOpenAgreement(false); }} />
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => {
+              setOpenPrivacy(false);
+              setOpenAgreement(false);
+            }}
+          />
           <div className="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
-            <h3 className="text-lg font-semibold text-slate-900">{openPrivacy ? 'Privacy Policy' : 'User Agreement'}</h3>
-            <div className="mt-3 space-y-3 text-sm leading-relaxed text-slate-700">
-              <p>Thank you for using the Re:Flow service. This document explains {openPrivacy ? 'how we collect, use, and protect your personal data.' : 'the terms and conditions for using our service, including your responsibilities while renting and operating the devices.'}</p>
-              <p>Key reminder: the data you submit (guest name and room number) is used for identification, billing, and the resort's operational records.</p>
-              <p>For the complete document, please contact the administrator or visit our official legal page.</p>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {openPrivacy ? 'Privacy Policy' : 'User Agreement'}
+            </h3>
+
+            <div className="mt-3">
+              {openPrivacy ? <PrivacyContent /> : <AgreementContent />}
             </div>
-            <div className="mt-5 flex justify-end">
-              <button onClick={() => { setOpenPrivacy(false); setOpenAgreement(false); }} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">Close</button>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setOpenPrivacy(false);
+                  setOpenAgreement(false);
+                }}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
@@ -604,7 +725,7 @@ const canOrder = (id: Pkg["id"]) => {
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9" /></svg>
             </div>
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Running Rentals</h2>
@@ -650,7 +771,7 @@ const canOrder = (id: Pkg["id"]) => {
                       <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
                       <td className="px-3 py-2 text-slate-800">{r.packageName}</td>
                       <td className="px-3 py-2 text-slate-700">{startedStr}</td>
-                      <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2,'0')}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</td>
+                      <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2, '0')}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}</td>
                       <td className="px-3 py-2 font-semibold text-slate-900">{fmt(charge)}</td>
                       <td className="px-3 py-2">
                         {r.status === 'active' ? (
@@ -685,7 +806,7 @@ const canOrder = (id: Pkg["id"]) => {
                     orderId: res?.order_id,
                     paymentType: snapContext?.paymentMode || res?.payment_type,
                   });
-                } catch {}
+                } catch { }
                 setRunning((prev) => prev.filter((x) => x.id !== snapContext.rentalId));
               }
               setResultMsg('Payment successful. Thank you for using our rental service.');
@@ -695,8 +816,8 @@ const canOrder = (id: Pkg["id"]) => {
               setSnapContext(null);
             }
           }}
-          onPending={(res: any) => { setResultMsg('Payment is pending confirmation from Midtrans.'); setSnapOpen(false); setSnapToken(null); setSnapContext(null); }}
-          onError={(err: any) => { setResultMsg('Payment failed. Please try again.'); setSnapOpen(false); setSnapToken(null); setSnapContext(null); }}
+          onPending={() => { setResultMsg('Payment is pending confirmation from Midtrans.'); setSnapOpen(false); setSnapToken(null); setSnapContext(null); }}
+          onError={() => { setResultMsg('Payment failed. Please try again.'); setSnapOpen(false); setSnapToken(null); setSnapContext(null); }}
           onClose={() => { setResultMsg('Payment window closed before completion.'); setSnapOpen(false); setSnapToken(null); setSnapContext(null); }}
         />
       )}
@@ -731,7 +852,7 @@ const canOrder = (id: Pkg["id"]) => {
                     if (isServerId) {
                       await api.post('/rentals/end', { rentalId: endTarget.id });
                     }
-                  } catch {}
+                  } catch { }
                   setEndConfirmOpen(false);
                   setEndTarget(null);
                 }}
@@ -750,18 +871,18 @@ const canOrder = (id: Pkg["id"]) => {
           <div className="relative w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <div className="mb-3 flex items-center gap-3">
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-rose-50 text-rose-700 ring-1 ring-rose-200">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9" /></svg>
               </div>
               <h3 className="text-lg font-semibold text-slate-900">Confirm Payment</h3>
             </div>
             {(() => {
               const start = payTarget.startedAt;
               const end = payTarget.endedAt || Date.now();
-              const durationSec = Math.max(0, Math.floor((end - start)/1000));
-              const hh = String(Math.floor(durationSec/3600)).padStart(2,'0');
-              const mm = String(Math.floor((durationSec%3600)/60)).padStart(2,'0');
-              const ss = String(durationSec%60).padStart(2,'0');
-              const durationMin = Math.max(0, Math.ceil((end - start)/60000));
+              const durationSec = Math.max(0, Math.floor((end - start) / 1000));
+              const hh = String(Math.floor(durationSec / 3600)).padStart(2, '0');
+              const mm = String(Math.floor((durationSec % 3600) / 60)).padStart(2, '0');
+              const ss = String(durationSec % 60).padStart(2, '0');
+              const durationMin = Math.max(0, Math.ceil((end - start) / 60000));
               const extraMinutes = Math.max(0, durationMin - payTarget.baseMinutes);
               const chargeableMinutes = Math.max(0, extraMinutes - EXTRA_GRACE_MINUTES);
               const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / EXTRA_BLOCK_MINUTES));
@@ -830,14 +951,12 @@ const canOrder = (id: Pkg["id"]) => {
                       {availablePayments.map((method) => (
                         <button
                           key={method}
-                          type="button"
                           disabled={payBusy}
                           onClick={() => setSelectedPayment(method)}
-                          className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${
-                            selectedPayment === method
-                              ? 'border-rose-500 bg-rose-50 text-rose-600'
-                              : 'border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-600'
-                          }`}
+                          className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${selectedPayment === method
+                            ? 'border-rose-500 bg-rose-50 text-rose-600'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-600'
+                            }`}
                         >
                           {PAYMENT_LABELS[method]}
                         </button>
@@ -851,7 +970,6 @@ const canOrder = (id: Pkg["id"]) => {
                       </div>
                       <div className="flex gap-3">
                         <button
-                          type="button"
                           disabled={payBusy}
                           onClick={() => handleConfirmPayment(selectedPayment, total)}
                           className="h-11 flex-1 rounded-xl bg-rose-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-50"
@@ -859,19 +977,17 @@ const canOrder = (id: Pkg["id"]) => {
                           {payBusy ? 'Processing...' : 'Yes, proceed'}
                         </button>
                         <button
-                          type="button"
                           disabled={payBusy}
                           onClick={() => setSelectedPayment(null)}
                           className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
                         >
-                          Change method
+                          No
                         </button>
                       </div>
                     </div>
                   )}
                   <div className="mt-6 flex justify-end">
                     <button
-                      type="button"
                       disabled={payBusy}
                       onClick={() => { if (!payBusy) { setPayConfirmOpen(false); setPayTarget(null); } }}
                       className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
@@ -893,7 +1009,7 @@ const canOrder = (id: Pkg["id"]) => {
           <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <div className="mb-3 flex items-center gap-3">
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
               </div>
               <h3 className="text-lg font-semibold text-slate-900">Credentials Ready</h3>
             </div>
@@ -921,37 +1037,6 @@ const canOrder = (id: Pkg["id"]) => {
         </div>
       )}
 
-      {/* Gridwiz code modal */}
-      {gridCred && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setGridCred(null)} />
-          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
-            <div className="mb-3 flex items-center gap-3">
-              <div className="grid h-9 w-9 place-items-center rounded-lg bg-sky-50 text-sky-700 ring-1 ring-sky-200">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5h18M3 12h18M3 16.5h18"/></svg>
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900">Gridwiz Login Code</h3>
-            </div>
-            <p className="text-sm text-slate-600">Berikan kode ini ke tamu. Mereka bisa masuk di halaman Gridwiz menggunakan kode di bawah, lalu masukkan nomor sepeda untuk unlock.</p>
-            <div className="mt-4 space-y-3">
-              <div className="text-xs font-medium text-slate-600">Kode</div>
-              <div className="flex items-center justify-between rounded-xl border border-slate-300 bg-white px-3 py-3 text-lg font-mono tracking-widest ring-1 ring-slate-200">
-                <span>{gridCred.code}</span>
-                <button onClick={() => navigator.clipboard.writeText(gridCred.code)} className="rounded-lg border px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-50">Copy</button>
-              </div>
-              <div className="text-xs text-slate-500">User ID: <span className="font-mono">{gridCred.userId}</span></div>
-            </div>
-            <div className="mt-4 rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800 ring-1 ring-emerald-200">
-              Halaman login Gridwiz: <a className="underline" href="/gridwiz" target="_blank">/gridwiz</a>
-            </div>
-            <div className="mt-5 flex gap-3">
-              <a href="/gridwiz" target="_blank" className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-center leading-[44px] text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Buka Halaman Gridwiz</a>
-              <button onClick={() => setGridCred(null)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Done</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {processing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/20">
           <div className="rounded-xl bg-white px-6 py-4 shadow ring-1 ring-slate-200">
@@ -967,7 +1052,6 @@ const canOrder = (id: Pkg["id"]) => {
     </div>
   );
 }
-
 
 
 
