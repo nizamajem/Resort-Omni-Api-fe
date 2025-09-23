@@ -28,7 +28,7 @@ const PAYMENT_CONFIRM_COPY: Record<PaymentOption, string> = {
 
 const EXTRA_HOURLY_RATE = 50000;
 const EXTRA_BLOCK_MINUTES = 60;
-const EXTRA_GRACE_MINUTES = 5;
+const EXTRA_GRACE_MINUTES = 10;
 
 export default function DashboardPage() {
   const makeOrderId = (prefix: string, baseId: string) => {
@@ -105,6 +105,7 @@ export default function DashboardPage() {
     endedAt?: number;
     status: 'active' | 'unpaid';
     amountDue?: number;
+    email: string;
   };
   const [running, setRunning] = useState<RunningRental[]>([]);
 
@@ -274,7 +275,8 @@ const canOrder = (id: Pkg["id"]) => {
           try {
             const rent = (data as any)?.rental;
             if (rent && rent.id) {
-              setRunning((prev) => ([...prev, rent]));
+              const rentalWithEmail = { ...rent, email: c?.email || "" };
+              setRunning((prev) => ([...prev, rentalWithEmail]));
               setResultMsg('Rental started. Credentials ready.');
               return;
             }
@@ -307,7 +309,10 @@ const canOrder = (id: Pkg["id"]) => {
                 basePrice: orderFor.price,
                 baseMinutes,
                 startedAt: Date.now(),
-                status: 'active' } as any,
+                status: 'active',
+                email: c?.email || ""
+               } as any,
+                
             ]));
             setResultMsg('Rental started locally (server start failed). Please verify backend /rentals/start.');
           }
@@ -604,6 +609,7 @@ const canOrder = (id: Pkg["id"]) => {
               <tr>
                 <th className="px-3 py-2 font-medium">Guest</th>
                 <th className="px-3 py-2 font-medium">Room</th>
+                <th className="px-3 py-2 font-medium">Email</th>
                 <th className="px-3 py-2 font-medium">Package</th>
                 <th className="px-3 py-2 font-medium">Start</th>
                 <th className="px-3 py-2 font-medium">Rental time</th>
@@ -633,6 +639,9 @@ const canOrder = (id: Pkg["id"]) => {
                   return (
                     <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
                       <td className="px-3 py-2 text-slate-800">{r.guestName}</td>
+
+                       <td className="px-3 py-2 text-slate-800">{r.email || '-'}</td>
+
                       <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
                       <td className="px-3 py-2 text-slate-800">{r.packageName}</td>
                       <td className="px-3 py-2 text-slate-700">{startedStr}</td>
