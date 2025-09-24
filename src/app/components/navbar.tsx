@@ -30,6 +30,18 @@ export default function NavBar() {
   }, []);
 
   useEffect(() => {
+    if (ctxResort && ctxResort !== resortName) {
+      setResortName(ctxResort);
+    }
+  }, [ctxResort]);
+
+  useEffect(() => {
+    if (ctxEmail && ctxEmail !== email) {
+      setEmail(ctxEmail);
+    }
+  }, [ctxEmail]);
+
+  useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       if (!menuRef.current) return;
       if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false);
@@ -51,6 +63,7 @@ export default function NavBar() {
   const links = [
     { href: "/dashboard", label: "Dashboard", show: true },
     { href: "/history", label: "History", show: true },
+    { href: "/profile", label: "Profile", show: true },
     { href: "/admin/resorts/add", label: "Add Resort", show: role === 'superadmin' },
     { href: "/admin/packages/add", label: "Packages", show: role === 'superadmin' },
   ].filter((l) => l.show);

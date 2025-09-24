@@ -109,13 +109,47 @@ export default function DashboardPage() {
   };
   const [running, setRunning] = useState<RunningRental[]>([]);
 
+  const normalizeRental = (raw: any): RunningRental => {
+    if (!raw) {
+      return {
+        id: '',
+        guestName: 'Guest',
+        roomNumber: '-',
+        pkg: '1h',
+        packageName: 'Package',
+        basePrice: 0,
+        baseMinutes: 0,
+        startedAt: Date.now(),
+        status: 'active',
+        email: '',
+      } as RunningRental;
+    }
+    const started = typeof raw.startedAt === 'number' ? raw.startedAt : Number(raw.startedAt ?? Date.now());
+    const ended = raw.endedAt === null || raw.endedAt === undefined ? undefined : Number(raw.endedAt);
+    const due = raw.amountDue === null || raw.amountDue === undefined ? undefined : Number(raw.amountDue);
+    const normalized: RunningRental = {
+      id: String(raw.id ?? ''),
+      guestName: raw.guestName ?? 'Guest',
+      roomNumber: raw.roomNumber ?? '-',
+      pkg: (raw.pkg ?? '1h') as RunningRental['pkg'],
+      packageName: raw.packageName ?? raw.pkg ?? 'Package',
+      basePrice: Number(raw.basePrice ?? 0),
+      baseMinutes: Number(raw.baseMinutes ?? 0),
+      startedAt: Number.isFinite(started) ? started : Date.now(),
+      endedAt: Number.isFinite(ended ?? NaN) ? ended : undefined,
+      status: raw.status === 'unpaid' ? 'unpaid' : 'active',
+      amountDue: Number.isFinite(due ?? NaN) ? due : undefined,
+      email: raw.email ?? raw.credentialEmail ?? raw.credential?.email ?? '',
+    };
+    return { ...raw, ...normalized } as RunningRental;
+  };
+
   // Backend base URL
   const API_BASE = useMemo(() => {
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
     return "http://localhost:4000/api";
   }, []);
-
   // Auth info (token + resort name)
   const [token, setToken] = useState<string | null>(null);
   const [resortName, setResortName] = useState<string>("");
@@ -177,7 +211,12 @@ export default function DashboardPage() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem('runningRentals');
-      if (raw) setRunning(JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setRunning(parsed.map((item: any) => normalizeRental(item)));
+        }
+      }
     } catch {}
     setLoadedLocal(true);
   }, []);
@@ -193,11 +232,11 @@ export default function DashboardPage() {
       try {
         const { data } = await api.get('/rentals/list');
         if (Array.isArray(data)) {
-          // Always replace server-backed items with server response,
-          // but keep client-only (temporary RUN-*) rows.
+          const serverNormalized = (data as any[]).map((item) => normalizeRental(item));
           setRunning((prev) => {
             const clientOnly = prev.filter((r: any) => String(r.id || '').startsWith('RUN-'));
-            return [...(data as any[]), ...clientOnly];
+            const dedupClient = clientOnly.filter((item) => !serverNormalized.some((srv) => srv.id === item.id));
+            return [...serverNormalized, ...dedupClient];
           });
         }
       } catch {}
@@ -276,7 +315,7 @@ const canOrder = (id: Pkg["id"]) => {
             const rent = (data as any)?.rental;
             if (rent && rent.id) {
               const rentalWithEmail = { ...rent, email: c?.email || "" };
-              setRunning((prev) => ([...prev, rentalWithEmail]));
+              setRunning((prev) => ([...prev, normalizeRental(rentalWithEmail)]));
               setResultMsg('Rental started. Credentials ready.');
               return;
             }
@@ -290,7 +329,7 @@ const canOrder = (id: Pkg["id"]) => {
               resortName: resortName || undefined,
             });
             if (r && r.id) {
-              setRunning((prev) => ([...prev, r]));
+              setRunning((prev) => ([...prev, normalizeRental(r)]));
               setResultMsg('Rental started. Credentials ready.');
             } else {
               setResultMsg('Rental start did not return an id. Please check backend.');
@@ -301,7 +340,8 @@ const canOrder = (id: Pkg["id"]) => {
             const baseMinutes = orderFor.id === '1h' ? 60 : orderFor.id === '3h' ? 180 : 1440;
             setRunning((prev) => ([
               ...prev,
-              { id: `RUN-${Date.now()}`,
+              normalizeRental({
+                id: `RUN-${Date.now()}`,
                 guestName: guestName || 'Guest',
                 roomNumber: roomNumber || '-',
                 pkg: orderFor.id,
@@ -310,9 +350,8 @@ const canOrder = (id: Pkg["id"]) => {
                 baseMinutes,
                 startedAt: Date.now(),
                 status: 'active',
-                email: c?.email || ""
-               } as any,
-                
+                email: c?.email || ''
+              })
             ]));
             setResultMsg('Rental started locally (server start failed). Please verify backend /rentals/start.');
           }
@@ -929,7 +968,3 @@ const canOrder = (id: Pkg["id"]) => {
     </div>
   );
 }
-
-
-
-

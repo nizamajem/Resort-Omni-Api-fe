@@ -7,17 +7,39 @@ import { useEffect, useState } from "react";
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { role, clear } = useAuth();
+  const { role, clear, resortName: authResortName, email: authEmail } = useAuth();
   const router = useRouter();
   const [roleState, setRole] = useState<string | null>(null);
+  const [resortLabel, setResortLabel] = useState<string>("");
+  const [emailLabel, setEmailLabel] = useState<string>("");
   const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     try {
       const r = localStorage.getItem("role") || (typeof document !== 'undefined' ? (document.cookie.match(/(?:^|; )role=([^;]+)/)?.[1] ? decodeURIComponent(document.cookie.match(/(?:^|; )role=([^;]+)/)![1]) : null) : null);
       setRole(r);
+      const raw = localStorage.getItem("auth");
+      const auth = raw ? JSON.parse(raw) : null;
+      setResortLabel(auth?.resortName || "");
+      setEmailLabel(auth?.email || "");
     } catch {}
   }, []);
+
+  useEffect(() => {
+    if (role) setRole(role);
+  }, [role]);
+
+  useEffect(() => {
+    if (authResortName !== undefined && authResortName !== null) {
+      setResortLabel(authResortName || "");
+    }
+  }, [authResortName]);
+
+  useEffect(() => {
+    if (authEmail !== undefined && authEmail !== null) {
+      setEmailLabel(authEmail || "");
+    }
+  }, [authEmail]);
 
   // Hide sidebar on login/auth pages regardless of role
   if (pathname && pathname.startsWith("/login")) {
@@ -25,19 +47,23 @@ export default function Sidebar() {
   }
 
   // Order: Dashboard -> Add Resort -> Add Package -> History
+  const isSuper = role === 'superadmin' || roleState === 'superadmin';
   const links = [
     { href: "/dashboard", label: "Dashboard", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5m-16.5 0A2.25 2.25 0 0 1 6 4.5h12a2.25 2.25 0 0 1 2.25 2.25m-16.5 0v10.5A2.25 2.25 0 0 0 6 21h12a2.25 2.25 0 0 0 2.25-2.25V6.75M8.25 9h7.5m-7.5 4.5H12"/></svg>
     ), show: true },
     { href: "/admin/resorts/add", label: "Add Resort", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.118a7.5 7.5 0 0 1 15 0A17.933 17.933 0 0 1 12 21.75c-2.68 0-5.216-.586-7.5-1.632Z"/></svg>
-    ), show: (role === "superadmin" || roleState === "superadmin") },
+    ), show: isSuper },
     { href: "/admin/packages/add", label: "Packages", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.375 7.5 12 12.75 20.625 7.5M12 21.75l-8.625-5.25V7.5L12 2.25l8.625 5.25v9L12 21.75Z"/></svg>
-    ), show: (role === "superadmin" || roleState === "superadmin") },
+    ), show: isSuper },
     { href: "/admin/settings", label: "Settings", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm8.25 3c0-.64-.07-1.26-.2-1.86l2.02-1.56-1.5-2.6-2.47.93a6.75 6.75 0 0 0-3.05-1.78L14.5 3h-5l-.35 2.73a6.75 6.75 0 0 0-3.05 1.78l-2.47-.93-1.5 2.6 2.02 1.56a6.87 6.87 0 0 0 0 3.72L2.13 16.56l1.5 2.6 2.47-.93a6.75 6.75 0 0 0 3.05 1.78L9.5 21h5l.35-2.73a6.75 6.75 0 0 0 3.05-1.78l2.47.93 1.5-2.6-2.02-1.56c.13-.6.2-1.22.2-1.86Z"/></svg>
-    ), show: (role === "superadmin" || roleState === "superadmin") },
+    ), show: isSuper },
+    { href: "/profile", label: "Profile", icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75a3.75 3.75 0 1 0-7.5 0A3.75 3.75 0 0 0 15.75 15.75ZM4.5 5.25h15M4.5 9h15"/></svg>
+    ), show: true },
     { href: "/history", label: "History", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3.5 3.5M12 3a9 9 0 1 0 9 9"/></svg>
     ), show: true },
@@ -54,7 +80,7 @@ export default function Sidebar() {
     <aside className="hidden w-64 shrink-0 border-r bg-white/90 backdrop-blur md:block ring-1 ring-slate-200">
       <div className="px-5 py-5">
         <div className="text-sm font-semibold text-slate-900">Partner Portal</div>
-        <div className="text-xs text-slate-500">Super Admin</div>
+        <div className="text-xs text-slate-500">{(role ?? roleState) === 'superadmin' ? 'Super Admin' : (resortLabel || emailLabel || 'Resort Account')}</div>
       </div>
       <nav className="px-3 py-2 space-y-1">
         {links.map((l) => {
