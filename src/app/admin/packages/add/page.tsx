@@ -19,7 +19,7 @@ const API_BASE = (() => {
 export default function AdminPackagesAddPage() {
   const [token, setToken] = useState<string | null>(null);
   useEffect(() => {
-    try { setToken(localStorage.getItem("token")); } catch {}
+    try { setToken(localStorage.getItem("token")); } catch { }
   }, []);
 
   // Add form state
@@ -59,7 +59,7 @@ export default function AdminPackagesAddPage() {
         result[id] = total;
       }
       setCounts(result);
-    } catch {}
+    } catch { }
   };
 
   const fetchAccounts = async () => {
@@ -187,24 +187,32 @@ export default function AdminPackagesAddPage() {
         <p className="mt-1 text-sm text-slate-600">Add credentials for the three fixed packages below. Each line is one account: email,password</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          {[{id:'1h',price:65000,label:'1 Hour'},{id:'3h',price:125000,label:'3 Hours'},{id:'1d',price:200000,label:'1 Day'}].map((c:any) => (
-            <div key={c.id} className={`rounded-xl border p-4 ring-1 ring-slate-200 ${pkg===c.id? 'bg-sky-50 border-sky-200' : 'bg-white'}`}>
+          {[{ id: '1h', label: '1 Hour' },
+          { id: '3h', label: '3 Hours' },
+          { id: '1d', label: '1 Day' }].map((c: any) => (
+            <div
+              key={c.id}
+              className={`rounded-xl border p-4 ring-1 ring-slate-200 ${pkg === c.id ? 'bg-sky-50 border-sky-200' : 'bg-white'}`}
+            >
               <div className="flex items-center justify-between">
                 <div className="text-sm font-medium text-slate-900">{c.label}</div>
-                <span className="text-xs text-slate-500">Active: <span className="font-semibold text-slate-900">{counts[c.id as PkgId] || 0}</span></span>
+                <span className="text-xs text-slate-500">
+                  Active: <span className="font-semibold text-slate-900">{counts[c.id as PkgId] || 0}</span>
+                </span>
               </div>
-              <div className="mt-1 text-lg font-semibold text-slate-900">{new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(c.price)}</div>
+              {/* bagian harga dihapus */}
             </div>
           ))}
         </div>
+
 
         <form onSubmit={onAdd} className="mt-5 grid gap-4 sm:grid-cols-3">
           <div>
             <Label htmlFor="pkg" requiredMark>Package</Label>
             <Select id="pkg" value={pkg} onChange={(e) => setPkg(e.target.value as PkgId)}>
-              <option value="1h">1 Hour (IDR 65,000)</option>
-              <option value="3h">3 Hours (IDR 125,000)</option>
-              <option value="1d">1 Day (IDR 200,000)</option>
+              <option value="1h">1 Hour</option>
+              <option value="3h">3 Hours</option>
+              <option value="1d">1 Day</option>
             </Select>
           </div>
 
@@ -217,7 +225,7 @@ export default function AdminPackagesAddPage() {
               placeholder={"email1@example.com,password1\nemail2@example.com,password2"}
               className="h-32 w-full rounded-md border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500 text-slate-900 placeholder:text-slate-400"
             />
-            <div className="mt-1 text-xs text-slate-700">Format: email,password (comma or whitespace separated) · {lines.trim()? lines.split(/\r?\n/).filter(l=>l.trim()).length : 0} line(s)</div>
+            <div className="mt-1 text-xs text-slate-700">Format: email,password (comma or whitespace separated) · {lines.trim() ? lines.split(/\r?\n/).filter(l => l.trim()).length : 0} line(s)</div>
           </div>
 
           <div className="sm:col-span-3 flex items-center gap-2">
@@ -280,28 +288,28 @@ export default function AdminPackagesAddPage() {
                       {r.status === 'active' ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                   <td className="px-3 py-2 align-top">
-                      <div className="flex gap-2">
-                        {r.status === 'active' ? (
-                          <Button
-                            variant="secondary"
-                            onClick={() => setConfirmDisable(r)}
-                            className="px-3 py-1 bg-gradient-to-b from-white to-rose-50 border border-rose-200 text-rose-700 ring-1 ring-rose-200 hover:to-rose-100"
-                          >
-                            Disable
-                          </Button>
-                        ) : (
-                          <Button variant="secondary" onClick={() => onToggleStatus(r)} className="px-3 py-1">Enable</Button>
-                        )}
+                  <td className="px-3 py-2 align-top">
+                    <div className="flex gap-2">
+                      {r.status === 'active' ? (
                         <Button
                           variant="secondary"
-                          onClick={() => startEdit(r)}
+                          onClick={() => setConfirmDisable(r)}
                           className="px-3 py-1 bg-gradient-to-b from-white to-rose-50 border border-rose-200 text-rose-700 ring-1 ring-rose-200 hover:to-rose-100"
                         >
-                          Edit
+                          Disable
                         </Button>
-                      </div>
-                   </td>
+                      ) : (
+                        <Button variant="secondary" onClick={() => onToggleStatus(r)} className="px-3 py-1">Enable</Button>
+                      )}
+                      <Button
+                        variant="secondary"
+                        onClick={() => startEdit(r)}
+                        className="px-3 py-1 bg-gradient-to-b from-white to-rose-50 border border-rose-200 text-rose-700 ring-1 ring-rose-200 hover:to-rose-100"
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {!loading && rows.length === 0 && (

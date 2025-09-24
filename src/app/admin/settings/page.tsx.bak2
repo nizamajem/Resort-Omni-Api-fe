@@ -5,13 +5,11 @@ import { Switch } from "@/app/components/ui/switch";
 import { api } from "@/app/lib/api";
 
 type PackageId = '1h' | '3h' | '1d';
-type RentalExtraKey = 'extraGraceMinutes' | 'extraHourlyRate';
 
 type FeatureConfig = {
   packages: Record<PackageId, boolean>;
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
   packagePrices: Record<PackageId, number>;
-  rentalExtras: Record<RentalExtraKey, number>;
 };
 
 type ToggleKey = { id: PackageId; label: string; description: string };
@@ -29,11 +27,6 @@ const PAYMENT_OPTIONS: PaymentToggle[] = [
   { id: 'midtransProduction', label: 'Online Payment (Midtrans Production)', description: 'Show Midtrans checkout when the system runs in production mode.' },
 ];
 
-const RENTAL_EXTRA_FIELDS: { key: RentalExtraKey; label: string; description: string; unit?: string; prefix?: string }[] = [
-  { key: 'extraGraceMinutes', label: 'Grace Period', description: 'Minutes before overtime charges apply.', unit: 'minutes' },
-  { key: 'extraHourlyRate', label: 'Extra Hourly Rate', description: 'Charge applied for each overtime block.', prefix: 'Rp' },
-];
-
 export default function AdminSettingsPage() {
   const [features, setFeatures] = useState<FeatureConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,9 +36,6 @@ export default function AdminSettingsPage() {
 
   const [priceInputs, setPriceInputs] = useState<Record<PackageId, string>>({ '1h': '', '3h': '', '1d': '' });
   const [priceSaving, setPriceSaving] = useState<PackageId | null>(null);
-
-  const [extraInputs, setExtraInputs] = useState<Record<RentalExtraKey, string>>({ extraGraceMinutes: '', extraHourlyRate: '' });
-  const [extraSaving, setExtraSaving] = useState<RentalExtraKey | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -67,17 +57,12 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     if (!features) {
       setPriceInputs({ '1h': '', '3h': '', '1d': '' });
-      setExtraInputs({ extraGraceMinutes: '', extraHourlyRate: '' });
       return;
     }
     setPriceInputs({
       '1h': features.packagePrices?.['1h'] !== undefined ? String(features.packagePrices['1h']) : '',
       '3h': features.packagePrices?.['3h'] !== undefined ? String(features.packagePrices['3h']) : '',
       '1d': features.packagePrices?.['1d'] !== undefined ? String(features.packagePrices['1d']) : '',
-    });
-    setExtraInputs({
-      extraGraceMinutes: features.rentalExtras?.extraGraceMinutes !== undefined ? String(features.rentalExtras.extraGraceMinutes) : '',
-      extraHourlyRate: features.rentalExtras?.extraHourlyRate !== undefined ? String(features.rentalExtras.extraHourlyRate) : '',
     });
   }, [features]);
 
@@ -131,46 +116,6 @@ export default function AdminSettingsPage() {
       setPriceSaving(null);
     }
   };
-
-  const handleExtraChange = (key: RentalExtraKey, next: string) => {
-    const sanitized = next.replace(/[^0-9]/g, '');
-    setExtraInputs((prev) => ({ ...prev, [key]: sanitized }));
-  };
-
-  const saveExtra = async (key: RentalExtraKey) => {
-  const raw = extraInputs[key];
-  if (raw === '') {
-    setError('Please enter a value before saving.');
-    return;
-  }
-  const numeric = Number(raw);
-  const isGrace = key === 'extraGraceMinutes';
-  const isValid = Number.isFinite(numeric) && (isGrace ? numeric >= 0 : numeric > 0);
-  if (!isValid) {
-    setError('Please enter a valid value before saving.');
-    return;
-  }
-  try {
-    setExtraSaving(key);
-    setMessage(null);
-    setError(null);
-    const payloadValue = Math.round(numeric);
-
-    // 1) Simpan
-    await api.put('/settings/features', { rentalExtras: { [key]: payloadValue } });
-
-    // 2) REFRESH setelah simpan (penting jika server tidak mengembalikan state lengkap)
-    const { data } = await api.get('/settings/features');
-    setFeatures((data || null) as FeatureConfig | null);
-
-    setMessage('Changes saved.');
-  } catch (e) {
-    setError('Failed to save value.');
-  } finally {
-    setExtraSaving(null);
-  }
-};
-
 
   return (
     <main className="space-y-8 px-4 pb-10 pt-6">
@@ -251,74 +196,6 @@ export default function AdminSettingsPage() {
                     <button
                       type="button"
                       onClick={() => savePrice(pkgId)}
-                      disabled={saveDisabled}
-                      className="h-9 rounded-lg bg-sky-600 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    >
-                      {saving ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">Rental Extras</h2>
-            <p className="text-sm text-slate-600">Configure grace period and overtime charges shown on the dashboard.</p>
-          </div>
-          <div className="space-y-4">
-            {RENTAL_EXTRA_FIELDS.map((field) => {
-              const key = field.key;
-              const saving = extraSaving === key;
-              const disabled = loading || saving;
-              const inputValue = extraInputs[key] ?? '';
-              const currentValue = features?.rentalExtras?.[key];
-              const numericInput = inputValue === '' ? NaN : Number(inputValue);
-              const isGraceField = key === 'extraGraceMinutes';
-              const canSave =
-                !disabled &&
-                inputValue !== '' &&
-                Number.isFinite(numericInput) &&
-                (isGraceField ? numericInput >= 0 : numericInput > 0);
-              const normalizedInput = Number.isFinite(numericInput) ? Math.round(numericInput) : NaN;
-              const currentIsNumber = typeof currentValue === 'number' && Number.isFinite(currentValue);
-              const normalizedCurrent = currentIsNumber ? Math.round(currentValue as number) : NaN;
-              const unchanged =
-                Number.isFinite(normalizedInput) &&
-                Number.isFinite(normalizedCurrent) &&
-                normalizedInput === normalizedCurrent;
-              const saveDisabled = !canSave || unchanged;
-              const currentLabel = currentIsNumber
-                ? field.prefix === 'Rp'
-                  ? formatIDR(currentValue as number)
-                  : `${normalizedCurrent}${field.unit ? ` ${field.unit}` : ''}`
-                : '-';
-              return (
-                <div key={field.key} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-900">{field.label}</div>
-                    <div className="text-xs text-slate-600">Current: {currentLabel}</div>
-                    <div className="text-xs text-slate-500">{field.description}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 shadow-sm">
-                      {field.prefix ? <span className="mr-2 text-xs font-medium text-slate-500">{field.prefix}</span> : null}
-                      <input
-                        value={inputValue}
-                        onChange={(event) => handleExtraChange(key, event.target.value)}
-                        disabled={disabled}
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        className="h-8 w-28 border-none bg-transparent text-right text-sm font-semibold text-slate-900 outline-none focus:ring-0"
-                        placeholder="0"
-                      />
-                      {field.unit ? <span className="ml-2 text-xs font-medium text-slate-500">{field.unit}</span> : null}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => saveExtra(key)}
                       disabled={saveDisabled}
                       className="h-9 rounded-lg bg-sky-600 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                     >

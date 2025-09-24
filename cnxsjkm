@@ -1,0 +1,24 @@
+[33m3ec893e4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mapi-omni-branch[m[33m, [m[1;31morigin/api-omni-branch[m[33m)[m uodate dashboard
+[33mc822ceec[m UPDATE BISNIS 1
+[33m32dd96f7[m Omni APi connected
+[33m250ec730[m delte filter in the history and update text color on the button
+[33m461d4a1d[m deploy at 18 September 2025
+[33mf47d6d96[m fecthing <history dan dashboard aman> tinggal midtrans
+[33m1addca42[m update detail button and result
+[33m9a1e3490[m update bug add resort, update tampilan benefit user pop up
+[33m7a0a1992[m production masih error refresh
+[33me77df984[m aman
+[33m572e1018[m update Occures error
+[33ma1e9c1d0[m BE sudah enableCors({ origin: true, credentials: true }). Tidak wajib pakai credentials: 'include' karena kita kirim token via header.
+[33ma219d91e[m update production email normal dan fitur navbar buat user resort
+[33mf70a6900[m prodcution -> aman
+[33m90631dd5[m update button dan fungsinya well  gas deploy
+[33m5ffc721f[m (add package fiture )
+[33m7b90e514[m fetch <add coupon turbopack issues
+[33mad26cf1e[m update add resort fitur <normal>
+[33m14c3816f[m update <history, dahboard, dan sidebar> normal
+[33m91b617fd[m fetching <sandbox midtrans api dan order online payment>
+[33m829f9cac[m fetching <cash payment method flow>
+[33mb53cf18f[m update login
+[33mf4305cf0[m login fetching with BE
+[33mfdef3f23[m Initial commit from Create Next App

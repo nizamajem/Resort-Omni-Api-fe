@@ -6,10 +6,13 @@ import { api } from "@/app/lib/api";
 
 type Pkg = { id: "1h" | "3h" | "1d"; title: string; desc: string; price: number; unit: string };
 
+type RentalExtrasConfig = { extraGraceMinutes: number; extraHourlyRate: number };
+
 type FeatureConfig = {
   packages: Record<Pkg['id'], boolean>;
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
   packagePrices: Record<Pkg['id'], number>;
+  rentalExtras: RentalExtrasConfig;
 };
 
 type PaymentOption = 'cash' | 'midtransSandbox' | 'midtransProduction';
@@ -27,9 +30,7 @@ const PAYMENT_CONFIRM_COPY: Record<PaymentOption, string> = {
   midtransProduction: 'Open Midtrans production checkout for a live payment.',
 };
 
-const EXTRA_HOURLY_RATE = 65000;
-const EXTRA_BLOCK_MINUTES = 60;
-const EXTRA_GRACE_MINUTES = 10;
+
 
 export default function DashboardPage() {
   const makeOrderId = (prefix: string, baseId: string) => {
@@ -49,6 +50,16 @@ export default function DashboardPage() {
     []
   );
   const [features, setFeatures] = useState<FeatureConfig | null>(null);
+
+  // default fallback kalau belum ada di server
+  const DEFAULTS = { grace: 10, rate: 65000, block: 60 };
+
+  const extras = useMemo(() => ({
+    grace: features?.rentalExtras?.extraGraceMinutes ?? DEFAULTS.grace,
+    rate: features?.rentalExtras?.extraHourlyRate ?? DEFAULTS.rate,
+    block: DEFAULTS.block, // kalau mau configurable juga, tinggal tambah field di backend
+  }), [features]);
+
 
   const packages = useMemo(() => {
     const withPricing = basePackages.map((pkg) => {
@@ -195,7 +206,7 @@ export default function DashboardPage() {
       const auth = raw ? JSON.parse(raw) : null;
       setResortName(auth?.resortName || "");
       setUserEmail(auth?.email || "");
-    } catch {}
+    } catch { }
 
     const onStorage = () => setToken(readToken());
     window.addEventListener('storage', onStorage);
@@ -224,7 +235,7 @@ export default function DashboardPage() {
     const run = async () => {
       try {
         const { data } = await api.get("/orders/availability"); setAvailability(data as any);
-      } catch {}
+      } catch { }
     };
     run();
   }, [API_BASE, token]);
@@ -238,13 +249,13 @@ export default function DashboardPage() {
           setRunning(parsed.map((item: any) => normalizeRental(item)));
         }
       }
-    } catch {}
+    } catch { }
     setLoadedLocal(true);
   }, []);
   // Persist running rentals (skip initial mount until local loaded)
   useEffect(() => {
     if (!loadedLocal) return;
-    try { localStorage.setItem('runningRentals', JSON.stringify(running)); } catch {}
+    try { localStorage.setItem('runningRentals', JSON.stringify(running)); } catch { }
   }, [running, loadedLocal]);
   // Load running rentals from server when logged in
   useEffect(() => {
@@ -260,7 +271,7 @@ export default function DashboardPage() {
             return [...serverNormalized, ...dedupClient];
           });
         }
-      } catch {}
+      } catch { }
     };
     loadServer();
   }, [token]);
@@ -277,7 +288,7 @@ export default function DashboardPage() {
       setSelectedPayment(null);
     }
   }, [availablePayments, selectedPayment]);
-const canOrder = (id: Pkg["id"]) => {
+  const canOrder = (id: Pkg["id"]) => {
     if (!hasAnyPayment) return false;
     if (features && features.packages && features.packages[id] === false) return false;
     if (availability?.enabled && availability.enabled[id] === false) return false;
@@ -285,7 +296,7 @@ const canOrder = (id: Pkg["id"]) => {
     return (availability[id] || 0) > 0;
   };
 
-  
+
 
   const fmt = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 
@@ -482,19 +493,19 @@ const canOrder = (id: Pkg["id"]) => {
     <div className="space-y-6">
       <section className="rounded-2xl bg-gradient-to-tr from-sky-50 to-emerald-50 p-[1px] shadow-sm">
         <div className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200">
-        <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z"/></svg>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z" /></svg>
+            </div>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
+              <p className="text-sm text-slate-600">Choose a package and complete checkout with cash or online payment.</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
-            <p className="text-sm text-slate-600">Choose a package and complete checkout with cash or online payment.</p>
-          </div>
-        </div>
         </div>
       </section>
 
-      
+
       {features && !hasAnyPayment && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           All payment methods are disabled. Please contact the super admin.
@@ -521,7 +532,7 @@ const canOrder = (id: Pkg["id"]) => {
                   <p className="mt-1 text-sm text-slate-600">{p.desc}</p>
                 </div>
                 <div className="h-10 w-10 grid place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 19.5l3-9h4.5m0 0L18 6h-3m1.5 4.5 3 3"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 19.5l3-9h4.5m0 0L18 6h-3m1.5 4.5 3 3" /></svg>
                 </div>
               </div>
               <div className="mt-4 flex items-baseline gap-2">
@@ -575,7 +586,11 @@ const canOrder = (id: Pkg["id"]) => {
                 <li>An internet connection is needed to enjoy the app.</li>
                 <li>Please download and install the Reflow app to unlock and ride your bike.</li>
                 <li>Your rental time begins once your Reflow account is activated.</li>
-                <li>If you go beyond your rental period, an extra IDR 50,000 will be added automatically for each additional hour.</li>
+                <li>
+                  If you go beyond your rental period, an extra {fmt(extras.rate)} will be added
+                  for each additional {extras.block} minutes (after {extras.grace} minutes grace).
+                </li>
+
                 <li>Your rental and ride history are safely stored in our system for your convenience.</li>
               </ol>
             </div>
@@ -639,7 +654,7 @@ const canOrder = (id: Pkg["id"]) => {
         </div>
       )}
 
-      
+
 
       {/* Legal modals */}
       {(openPrivacy || openAgreement) && (
@@ -664,7 +679,7 @@ const canOrder = (id: Pkg["id"]) => {
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9" /></svg>
             </div>
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Running Rentals</h2>
@@ -696,9 +711,9 @@ const canOrder = (id: Pkg["id"]) => {
                   const elapsedSec = Math.max(0, Math.floor((end - r.startedAt) / 1000));
                   const elapsedMin = Math.max(0, Math.ceil((end - r.startedAt) / 60000));
                   const extraMinutes = Math.max(0, elapsedMin - base);
-                  const chargeableMinutes = Math.max(0, extraMinutes - EXTRA_GRACE_MINUTES);
-                  const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / EXTRA_BLOCK_MINUTES));
-                  const extraCost = extraBlocks * EXTRA_HOURLY_RATE;
+                  const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
+                  const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
+                  const extraCost = extraBlocks * extras.rate;
                   const charge = r.status === 'active' ? r.basePrice + extraCost : (r.amountDue ?? (r.basePrice + extraCost));
                   const hours = Math.floor(elapsedSec / 3600);
                   const minutes = Math.floor((elapsedSec % 3600) / 60);
@@ -709,10 +724,10 @@ const canOrder = (id: Pkg["id"]) => {
                     <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
                       <td className="px-3 py-2 text-slate-800">{r.guestName}</td>
                       <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
-                       <td className="px-3 py-2 text-slate-800">{getRentalEmail(r)}</td>
+                      <td className="px-3 py-2 text-slate-800">{getRentalEmail(r)}</td>
                       <td className="px-3 py-2 text-slate-800">{r.packageName}</td>
                       <td className="px-3 py-2 text-slate-700">{startedStr}</td>
-                      <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2,'0')}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</td>
+                      <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2, '0')}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}</td>
                       <td className="px-3 py-2 font-semibold text-slate-900">{fmt(charge)}</td>
                       <td className="px-3 py-2">
                         {r.status === 'active' ? (
@@ -747,7 +762,7 @@ const canOrder = (id: Pkg["id"]) => {
                     orderId: res?.order_id,
                     paymentType: snapContext?.paymentMode || res?.payment_type,
                   });
-                } catch {}
+                } catch { }
                 setRunning((prev) => prev.filter((x) => x.id !== snapContext.rentalId));
               }
               setResultMsg('Payment successful. Thank you for using our rental service.');
@@ -782,9 +797,10 @@ const canOrder = (id: Pkg["id"]) => {
                   const endAt = Date.now();
                   const elapsedM = Math.max(0, Math.ceil((endAt - endTarget.startedAt) / 60000));
                   const extraMinutes = Math.max(0, elapsedM - endTarget.baseMinutes);
-                  const chargeableMinutes = Math.max(0, extraMinutes - EXTRA_GRACE_MINUTES);
-                  const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / EXTRA_BLOCK_MINUTES));
-                  const due = endTarget.basePrice + extraBlocks * EXTRA_HOURLY_RATE;
+                  const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
+                  const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
+                  const due = endTarget.basePrice + extraBlocks * extras.rate;
+
                   setRunning((prev) => prev.map((x) => x.id === endTarget.id ? { ...x, status: 'unpaid', endedAt: endAt, amountDue: due } : x));
                   setResultMsg('Rental ended. Please proceed to payment.');
                   // Try to persist to server (if logged in and server id)
@@ -793,7 +809,7 @@ const canOrder = (id: Pkg["id"]) => {
                     if (isServerId) {
                       await api.post('/rentals/end', { rentalId: endTarget.id });
                     }
-                  } catch {}
+                  } catch { }
                   setEndConfirmOpen(false);
                   setEndTarget(null);
                 }}
@@ -812,22 +828,22 @@ const canOrder = (id: Pkg["id"]) => {
           <div className="relative w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <div className="mb-3 flex items-center gap-3">
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-rose-50 text-rose-700 ring-1 ring-rose-200">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3M12 3a9 9 0 1 0 9 9" /></svg>
               </div>
               <h3 className="text-lg font-semibold text-slate-900">Confirm Payment</h3>
             </div>
             {(() => {
               const start = payTarget.startedAt;
               const end = payTarget.endedAt || Date.now();
-              const durationSec = Math.max(0, Math.floor((end - start)/1000));
-              const hh = String(Math.floor(durationSec/3600)).padStart(2,'0');
-              const mm = String(Math.floor((durationSec%3600)/60)).padStart(2,'0');
-              const ss = String(durationSec%60).padStart(2,'0');
-              const durationMin = Math.max(0, Math.ceil((end - start)/60000));
+              const durationSec = Math.max(0, Math.floor((end - start) / 1000));
+              const hh = String(Math.floor(durationSec / 3600)).padStart(2, '0');
+              const mm = String(Math.floor((durationSec % 3600) / 60)).padStart(2, '0');
+              const ss = String(durationSec % 60).padStart(2, '0');
+              const durationMin = Math.max(0, Math.ceil((end - start) / 60000));
               const extraMinutes = Math.max(0, durationMin - payTarget.baseMinutes);
-              const chargeableMinutes = Math.max(0, extraMinutes - EXTRA_GRACE_MINUTES);
-              const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / EXTRA_BLOCK_MINUTES));
-              const extrasCost = extraBlocks * EXTRA_HOURLY_RATE;
+              const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
+              const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
+              const extrasCost = extraBlocks * extras.rate;
               const total = payTarget.amountDue ?? (payTarget.basePrice + extrasCost);
               const startStr = new Date(start).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
               const endStr = new Date(end).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
@@ -872,7 +888,7 @@ const canOrder = (id: Pkg["id"]) => {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600">
-                          Extra time (tolerance {EXTRA_GRACE_MINUTES} min)
+                          Extra time (tolerance {extras.grace} min)
                           {extraBlocks > 0 && (
                             <span className="text-slate-500"> - {extraBlocks} x 60 min</span>
                           )}
@@ -895,11 +911,10 @@ const canOrder = (id: Pkg["id"]) => {
                           type="button"
                           disabled={payBusy}
                           onClick={() => setSelectedPayment(method)}
-                          className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${
-                            selectedPayment === method
-                              ? 'border-rose-500 bg-rose-50 text-rose-600'
-                              : 'border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-600'
-                          }`}
+                          className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${selectedPayment === method
+                            ? 'border-rose-500 bg-rose-50 text-rose-600'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-600'
+                            }`}
                         >
                           {PAYMENT_LABELS[method]}
                         </button>
@@ -955,7 +970,7 @@ const canOrder = (id: Pkg["id"]) => {
           <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <div className="mb-3 flex items-center gap-3">
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
               </div>
               <h3 className="text-lg font-semibold text-slate-900">Credentials Ready</h3>
             </div>
