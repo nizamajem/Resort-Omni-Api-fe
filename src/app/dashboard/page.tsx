@@ -7,8 +7,9 @@ import { api } from "@/app/lib/api";
 type Pkg = { id: "1h" | "3h" | "1d"; title: string; desc: string; price: number; unit: string };
 
 type FeatureConfig = {
-  packages: { '1h': boolean; '3h': boolean; '1d': boolean };
+  packages: Record<Pkg['id'], boolean>;
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
+  packagePrices: Record<Pkg['id'], number>;
 };
 
 type PaymentOption = 'cash' | 'midtransSandbox' | 'midtransProduction';
@@ -26,7 +27,7 @@ const PAYMENT_CONFIRM_COPY: Record<PaymentOption, string> = {
   midtransProduction: 'Open Midtrans production checkout for a live payment.',
 };
 
-const EXTRA_HOURLY_RATE = 50000;
+const EXTRA_HOURLY_RATE = 65000;
 const EXTRA_BLOCK_MINUTES = 60;
 const EXTRA_GRACE_MINUTES = 10;
 
@@ -41,8 +42,8 @@ export default function DashboardPage() {
   };
   const basePackages = useMemo<Pkg[]>(
     () => [
-      { id: "1h", title: "1 Hour", desc: "Perfect for short city rides.", price: 50000, unit: "hour" },
-      { id: "3h", title: "3 Hours", desc: "Explore more with extra time.", price: 100000, unit: "3 hours" },
+      { id: "1h", title: "1 Hour", desc: "Perfect for short city rides.", price: 65000, unit: "hour" },
+      { id: "3h", title: "3 Hours", desc: "Explore more with extra time.", price: 125000, unit: "3 hours" },
       { id: "1d", title: "1 Day", desc: "Full day adventure on e-bike.", price: 200000, unit: "day" },
     ],
     []
@@ -50,8 +51,16 @@ export default function DashboardPage() {
   const [features, setFeatures] = useState<FeatureConfig | null>(null);
 
   const packages = useMemo(() => {
-    if (!features) return basePackages;
-    return basePackages.filter((pkg) => features.packages?.[pkg.id] !== false);
+    const withPricing = basePackages.map((pkg) => {
+      const override = features?.packagePrices?.[pkg.id];
+      const numeric = Number(override);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return { ...pkg, price: Math.round(numeric) };
+      }
+      return pkg;
+    });
+    if (!features) return withPricing;
+    return withPricing.filter((pkg) => features.packages?.[pkg.id] !== false);
   }, [basePackages, features]);
 
   const cashEnabled = features ? !!features.payments.cash : true;
@@ -520,7 +529,7 @@ const canOrder = (id: Pkg["id"]) => {
                 <div className="text-sm text-slate-500">/ {p.unit}</div>
               </div>
               <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Includes {fmt(p.price)} Reflow balance
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> price includes 11%VAT and 10% service charge
               </div>
               <div className="mt-6 flex gap-3">
                 <button onClick={() => onDetail(p)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Detail</button>

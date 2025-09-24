@@ -187,7 +187,7 @@ export default function AdminPackagesAddPage() {
         <p className="mt-1 text-sm text-slate-600">Add credentials for the three fixed packages below. Each line is one account: email,password</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          {[{id:'1h',price:50000,label:'1 Hour'},{id:'3h',price:100000,label:'3 Hours'},{id:'1d',price:200000,label:'1 Day'}].map((c:any) => (
+          {[{id:'1h',price:65000,label:'1 Hour'},{id:'3h',price:125000,label:'3 Hours'},{id:'1d',price:200000,label:'1 Day'}].map((c:any) => (
             <div key={c.id} className={`rounded-xl border p-4 ring-1 ring-slate-200 ${pkg===c.id? 'bg-sky-50 border-sky-200' : 'bg-white'}`}>
               <div className="flex items-center justify-between">
                 <div className="text-sm font-medium text-slate-900">{c.label}</div>
@@ -202,8 +202,8 @@ export default function AdminPackagesAddPage() {
           <div>
             <Label htmlFor="pkg" requiredMark>Package</Label>
             <Select id="pkg" value={pkg} onChange={(e) => setPkg(e.target.value as PkgId)}>
-              <option value="1h">1 Hour (IDR 50,000)</option>
-              <option value="3h">3 Hours (IDR 100,000)</option>
+              <option value="1h">1 Hour (IDR 65,000)</option>
+              <option value="3h">3 Hours (IDR 125,000)</option>
               <option value="1d">1 Day (IDR 200,000)</option>
             </Select>
           </div>
