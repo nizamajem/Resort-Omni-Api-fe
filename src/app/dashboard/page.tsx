@@ -639,10 +639,8 @@ const canOrder = (id: Pkg["id"]) => {
                   return (
                     <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
                       <td className="px-3 py-2 text-slate-800">{r.guestName}</td>
-
-                       <td className="px-3 py-2 text-slate-800">{r.email || '-'}</td>
-
                       <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
+                       <td className="px-3 py-2 text-slate-800">{r.email || '-'}</td>
                       <td className="px-3 py-2 text-slate-800">{r.packageName}</td>
                       <td className="px-3 py-2 text-slate-700">{startedStr}</td>
                       <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2,'0')}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</td>

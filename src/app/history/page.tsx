@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/app/lib/api";
+import { useAuth } from "@/app/auth.context";
 
 type HistoryRow = {
   id: string;
@@ -54,6 +55,15 @@ export default function HistoryPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
+  const { role } = useAuth();
+  const isSuperAdmin = role === 'superadmin';
+
+  const [notice, setNotice] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ rentalId: string; historyId?: string; label: string } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const columnCount = isSuperAdmin ? 10 : 9;
+
   const API_BASE = useMemo(() => {
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
     if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
@@ -68,6 +78,7 @@ export default function HistoryPage() {
   const load = async () => {
     setLoading(true);
     setError(null);
+    setNotice(null);
     setDebug([]);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
@@ -144,28 +155,62 @@ export default function HistoryPage() {
 
 
   const unified = useMemo(() => {
-    const mapped = rentals.map((x) => {
-      const start = x.startedAt; const end = x.endedAt || start;
-      const durSec = Math.max(0, Math.floor((end - start)/1000));
-      const hh = String(Math.floor(durSec/3600)).padStart(2,'0');
-      const mm2 = String(Math.floor((durSec%3600)/60)).padStart(2,'0');
-      const ss2 = String(durSec%60).padStart(2,'0');
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const findHistoryForRental = (rental: RentalRow) => {
+      if (!safeRows.length) return undefined;
+      const orderId = (rental as any).paymentOrderId as string | undefined;
+      if (orderId) {
+        const orderMatch = safeRows.find((row) => row.orderId && row.orderId === orderId);
+        if (orderMatch) return orderMatch;
+      }
+      const candidates = safeRows.filter((row) => {
+        if (row.resortName && rental.resortName && row.resortName !== rental.resortName) return false;
+        if (row.packageName && row.packageName !== rental.packageName) return false;
+        if (typeof row.price === 'number' && Number(row.price || 0) !== rental.basePrice) return false;
+        return true;
+      });
+      if (!candidates.length) return undefined;
+      const startTs = rental.startedAt;
+      const ranked = candidates
+        .map((row) => {
+          const ts = row.purchasedAt ? Date.parse(row.purchasedAt) : NaN;
+          const diff = Number.isFinite(ts) ? Math.abs(ts - startTs) : Number.POSITIVE_INFINITY;
+          return { row, diff };
+        })
+        .sort((a, b) => a.diff - b.diff);
+      return ranked[0]?.row;
+    };
+    const ended = rentals
+      .filter((r) => typeof r.endedAt === 'number' && r.endedAt > 0)
+      .sort((a, b) => {
+        const endA = typeof a.endedAt === 'number' ? a.endedAt : a.startedAt;
+        const endB = typeof b.endedAt === 'number' ? b.endedAt : b.startedAt;
+        return (endB || 0) - (endA || 0);
+      });
+    return ended.map((r) => {
+      const historyRow = findHistoryForRental(r);
+      const start = r.startedAt;
+      const end = typeof r.endedAt === 'number' && r.endedAt > 0 ? r.endedAt : start;
+      const durSec = Math.max(0, Math.floor((end - start) / 1000));
+      const hh = String(Math.floor(durSec / 3600)).padStart(2, '0');
+      const mm2 = String(Math.floor((durSec % 3600) / 60)).padStart(2, '0');
+      const ss2 = String(durSec % 60).padStart(2, '0');
       return ({
         _type: 'Rental' as const,
-        key: `r-${x.id}`,
-        guest: x.guestName,
-        pkg: x.packageName,
+        key: `r-${r.id}`,
+        guest: r.guestName,
+        pkg: r.packageName,
         start,
         end,
         dur: `${hh}:${mm2}:${ss2}`,
-        methodOrderId: (x as any).paymentOrderId as string | undefined,
-        methodDirect: (x as any).paymentType as string | undefined,
-        status: x.status,
-        raw: x,
+        methodOrderId: (r as any).paymentOrderId as string | undefined,
+        methodDirect: (r as any).paymentType as string | undefined,
+        status: r.status,
+        historyId: historyRow?.id,
+        raw: r,
       });
     });
-    return mapped;
-  }, [rentals]);
+  }, [rentals, rows]);
 
   const filteredUnified = useMemo(() => {
     const text = q.toLowerCase();
@@ -227,6 +272,44 @@ export default function HistoryPage() {
     URL.revokeObjectURL(url);
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    setError(null);
+    try {
+      addDebug({ step: 'history:delete:begin', ok: true, payload: deleteTarget });
+      try {
+        const resRental = await api.delete(`/rentals/${deleteTarget.rentalId}`);
+        addDebug({ step: 'history:delete:rental', ok: true, status: resRental?.status });
+      } catch (err: any) {
+        addDebug({ step: 'history:delete:rental', ok: false, error: err?.message, response: err?.response?.data });
+        throw err;
+      }
+      if (deleteTarget.historyId) {
+        try {
+          const resHist = await api.delete(`/orders/history/${deleteTarget.historyId}`);
+          addDebug({ step: 'history:delete:history', ok: true, status: resHist?.status });
+        } catch (err: any) {
+          addDebug({ step: 'history:delete:history', ok: false, error: err?.message, response: err?.response?.data });
+        }
+      }
+      setRentals((prev) => prev.filter((x) => x.id !== deleteTarget.rentalId));
+      if (deleteTarget.historyId) {
+        setRows((prev) => prev.filter((x) => x.id !== deleteTarget.historyId));
+      }
+      setDeleteTarget(null);
+      setNotice('History entry deleted.');
+      setPage(1);
+      addDebug({ step: 'history:delete:complete', ok: true });
+    } catch (err: any) {
+      const detail = err?.response?.data?.error || err?.response?.data?.message || err?.message || '';
+      setError(detail ? `Failed to delete history entry. ${detail}` : 'Failed to delete history entry.');
+      addDebug({ step: 'history:delete:error', ok: false, status: err?.response?.status, error: detail || err?.message, response: err?.response?.data });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   const StatusPill = ({ s }: { s?: HistoryRow["status"] }) => {
     const map: Record<string, string> = {
       success: "bg-emerald-50 text-emerald-700 ring-emerald-200",
@@ -245,7 +328,7 @@ export default function HistoryPage() {
   };
 
   const MethodPill = ({ orderId }: { orderId?: string }) => {
-    const label = orderId ? (methodMap[orderId] ? String(methodMap[orderId]).replace(/_/g,' ').toUpperCase() : 'CHECKING…') : '-';
+    const label = orderId ? (methodMap[orderId] ? String(methodMap[orderId]).replace(/_/g,' ').toUpperCase() : 'CHECKING...') : '-';
     return <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ring-1 bg-sky-50 text-sky-700 ring-sky-200`}>{label}</span>;
   };
 
@@ -352,13 +435,14 @@ export default function HistoryPage() {
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Payment</th>
                 <th className="px-4 py-3 font-medium">Detail</th>
+                {isSuperAdmin && <th className="px-4 py-3 font-medium">Operation</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">Loading...</td></tr>
+                <tr><td colSpan={columnCount} className="px-4 py-6 text-center text-slate-500">Loading...</td></tr>
               ) : filteredUnified.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">No data.</td></tr>
+                <tr><td colSpan={columnCount} className="px-4 py-6 text-center text-slate-500">No data.</td></tr>
               ) : (
                 filteredUnified.slice(start, end).map((u: any) => (
                   <tr key={u.key} className="border-t border-slate-100">
@@ -371,6 +455,29 @@ export default function HistoryPage() {
                     <td className="px-4 py-3"><RentalStatusPill s={u.status as any} /></td>
                     <td className="px-4 py-3"><PaymentPill orderId={u.methodOrderId} direct={u.methodDirect} /></td>
                     <td className="px-4 py-3"><button onClick={() => openDetail(u.raw)} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50">Details</button></td>
+                    {isSuperAdmin && (
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          disabled={deleteBusy}
+                          onClick={() => {
+                            if (!u?.raw?.id) return;
+                            setNotice(null);
+                            setError(null);
+                            setDeleteTarget({
+                              rentalId: u.raw.id,
+                              historyId: u.historyId,
+                              label: `${u.guest || 'Guest'} - ${fmtDate(u.end || u.start)}`
+                            });
+                          }}
+                          aria-label="Delete history"
+                          title="Delete history"
+                          className="rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m1 0v11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V7m3 4v6m4-6v6"/></svg>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -478,8 +585,50 @@ export default function HistoryPage() {
             </button>
           </div>
         </div>
+        {notice && <div className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700 ring-1 ring-emerald-200">{notice}</div>}
         {error && <div className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">{error}</div>}
       </section>
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { if (!deleteBusy) setDeleteTarget(null); }}
+          />
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-lg bg-rose-50 text-rose-700 ring-1 ring-rose-200">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M4.93 19.07a10 10 0 1 1 14.14 0 10 10 0 0 1-14.14 0Z"/></svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Delete History?</h3>
+            </div>
+            <p className="text-sm text-slate-600">This will remove the selected rental record{deleteTarget?.historyId ? ' and its payment history entry' : ''}. This action cannot be undone.</p>
+            <div className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-700 ring-1 ring-slate-200">
+              <div className="font-medium text-slate-900">{deleteTarget.label}</div>
+              <div className="text-xs text-slate-500">
+                Rental ID: {deleteTarget.rentalId}
+                {deleteTarget.historyId && (<span> - History ID: {deleteTarget.historyId}</span>)}
+              </div>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={handleConfirmDelete}
+                disabled={deleteBusy}
+                className="h-11 flex-1 rounded-xl bg-rose-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-50"
+              >
+                {deleteBusy ? 'Deleting...' : 'Yes, delete'}
+              </button>
+              <button
+                onClick={() => { if (!deleteBusy) setDeleteTarget(null); }}
+                disabled={deleteBusy}
+                className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rental detail modal */}
       {detailRow && (
@@ -547,3 +696,9 @@ export default function HistoryPage() {
     </div>
   );
 }
+
+
+
+
+
+
