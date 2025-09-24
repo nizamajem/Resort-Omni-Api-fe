@@ -419,7 +419,7 @@ export default function HistoryPage() {
           {(q || from || to || statusFilter !== "all" || methodFilter !== "all") && (
             <button suppressHydrationWarning onClick={() => { setQ(""); setFrom(""); setTo(""); setStatusFilter("all"); setMethodFilter("all"); load(); }} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition hover:bg-slate-50">Reset</button>
           )}
-          <button suppressHydrationWarning onClick={() => setDebugOpen((x) => !x)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">{debugOpen ? 'Hide Debug' : 'Show Debug'}</button>
+          {/* <button suppressHydrationWarning onClick={() => setDebugOpen((x) => !x)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">{debugOpen ? 'Hide Debug' : 'Show Debug'}</button> */}
         </div>
 
         <div className="mt-6 overflow-x-auto rounded-2xl ring-1 ring-slate-200">
