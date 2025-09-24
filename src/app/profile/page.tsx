@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth.context";
 import { api } from "@/app/lib/api";
 
+
 export default function ProfilePage() {
   const { role, resortName, email, setAuth, refreshFromStorage } = useAuth();
   const [name, setName] = useState(resortName ?? "");
@@ -188,5 +189,8 @@ export default function ProfilePage() {
         </section>
       )}
     </div>
+    
   );
+
+
 }
