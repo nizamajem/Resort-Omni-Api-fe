@@ -106,6 +106,7 @@ export default function DashboardPage() {
     status: 'active' | 'unpaid';
     amountDue?: number;
     email: string;
+    credentialEmail?: string;
   };
   const [running, setRunning] = useState<RunningRental[]>([]);
 
@@ -127,6 +128,12 @@ export default function DashboardPage() {
     const started = typeof raw.startedAt === 'number' ? raw.startedAt : Number(raw.startedAt ?? Date.now());
     const ended = raw.endedAt === null || raw.endedAt === undefined ? undefined : Number(raw.endedAt);
     const due = raw.amountDue === null || raw.amountDue === undefined ? undefined : Number(raw.amountDue);
+    const rawEmail = typeof raw?.email === 'string' ? raw.email.trim() : '';
+    const credentialEmail = typeof raw?.credentialEmail === 'string' ? raw.credentialEmail.trim() : '';
+    const relatedCredentialEmail = typeof raw?.credential?.email === 'string' ? raw.credential.email.trim() : '';
+    const emailResolved = rawEmail || credentialEmail || relatedCredentialEmail;
+    const credentialResolved = credentialEmail || relatedCredentialEmail || rawEmail;
+
     const normalized: RunningRental = {
       id: String(raw.id ?? ''),
       guestName: raw.guestName ?? 'Guest',
@@ -139,9 +146,14 @@ export default function DashboardPage() {
       endedAt: Number.isFinite(ended ?? NaN) ? ended : undefined,
       status: raw.status === 'unpaid' ? 'unpaid' : 'active',
       amountDue: Number.isFinite(due ?? NaN) ? due : undefined,
-      email: raw.email ?? raw.credentialEmail ?? raw.credential?.email ?? '',
+      email: emailResolved,
+      credentialEmail: credentialResolved || undefined,
     };
-    return { ...raw, ...normalized } as RunningRental;
+    const sanitized: any = { ...raw, ...normalized, credentialEmail: credentialResolved };
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'credentialPassword')) {
+      delete sanitized.credentialPassword;
+    }
+    return sanitized as RunningRental;
   };
 
   // Backend base URL
@@ -268,6 +280,13 @@ const canOrder = (id: Pkg["id"]) => {
 
   const fmt = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 
+  const getRentalEmail = (r: RunningRental) => {
+    const primary = typeof r.email === 'string' ? r.email.trim() : '';
+    if (primary) return primary;
+    const fallback = typeof r.credentialEmail === 'string' ? r.credentialEmail.trim() : '';
+    return fallback || '-';
+  };
+
   const onDetail = (p: Pkg) => {
     setDetailFor(p);
   };
@@ -327,6 +346,8 @@ const canOrder = (id: Pkg["id"]) => {
               guestName,
               roomNumber,
               resortName: resortName || undefined,
+              credentialEmail: c?.email || undefined,
+              credentialPassword: c?.password || undefined,
             });
             if (r && r.id) {
               setRunning((prev) => ([...prev, normalizeRental(r)]));
@@ -679,7 +700,7 @@ const canOrder = (id: Pkg["id"]) => {
                     <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
                       <td className="px-3 py-2 text-slate-800">{r.guestName}</td>
                       <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
-                       <td className="px-3 py-2 text-slate-800">{r.email || '-'}</td>
+                       <td className="px-3 py-2 text-slate-800">{getRentalEmail(r)}</td>
                       <td className="px-3 py-2 text-slate-800">{r.packageName}</td>
                       <td className="px-3 py-2 text-slate-700">{startedStr}</td>
                       <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2,'0')}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</td>
