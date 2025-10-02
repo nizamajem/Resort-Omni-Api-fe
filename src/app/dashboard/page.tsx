@@ -6,7 +6,7 @@ import { api } from "@/app/lib/api";
 
 type Pkg = { id: "1h" | "3h" | "1d"; title: string; desc: string; price: number; unit: string };
 
-type RentalExtrasConfig = { extraGraceMinutes: number; extraHourlyRate: number };
+type RentalExtrasConfig = { extraGraceMinutes: number; extraHourlyRate: number; extraBlockMinutes?: number };
 
 type FeatureConfig = {
   packages: Record<Pkg['id'], boolean>;
@@ -54,12 +54,15 @@ export default function DashboardPage() {
   // default fallback kalau belum ada di server
   const DEFAULTS = { grace: 10, rate: 65000, block: 60 };
 
-  const extras = useMemo(() => ({
-    grace: features?.rentalExtras?.extraGraceMinutes ?? DEFAULTS.grace,
-    rate: features?.rentalExtras?.extraHourlyRate ?? DEFAULTS.rate,
-    block: DEFAULTS.block, // kalau mau configurable juga, tinggal tambah field di backend
-  }), [features]);
-
+  const extras = useMemo(() => {
+    const graceRaw = Number(features?.rentalExtras?.extraGraceMinutes);
+    const rateRaw = Number(features?.rentalExtras?.extraHourlyRate);
+    const blockRaw = Number(features?.rentalExtras?.extraBlockMinutes);
+    const grace = Number.isFinite(graceRaw) && graceRaw >= 0 ? Math.round(graceRaw) : DEFAULTS.grace;
+    const rate = Number.isFinite(rateRaw) && rateRaw > 0 ? Math.round(rateRaw) : DEFAULTS.rate;
+    const block = Number.isFinite(blockRaw) && blockRaw > 0 ? Math.max(1, Math.round(blockRaw)) : DEFAULTS.block;
+    return { grace, rate, block };
+  }, [features]);
 
   const packages = useMemo(() => {
     const withPricing = basePackages.map((pkg) => {
@@ -117,6 +120,7 @@ export default function DashboardPage() {
     id: string;
     guestName: string;
     roomNumber: string;
+    resortName: string;
     pkg: Pkg["id"];
     packageName: string;
     basePrice: number;
@@ -153,11 +157,14 @@ export default function DashboardPage() {
     const relatedCredentialEmail = typeof raw?.credential?.email === 'string' ? raw.credential.email.trim() : '';
     const emailResolved = rawEmail || credentialEmail || relatedCredentialEmail;
     const credentialResolved = credentialEmail || relatedCredentialEmail || rawEmail;
+    const rawResortName = typeof raw?.resortName === 'string' ? raw.resortName.trim() : '';
+    const resortResolved = rawResortName || (resortName || '');
 
     const normalized: RunningRental = {
       id: String(raw.id ?? ''),
       guestName: raw.guestName ?? 'Guest',
       roomNumber: raw.roomNumber ?? '-',
+      resortName: resortResolved,
       pkg: (raw.pkg ?? '1h') as RunningRental['pkg'],
       packageName: raw.packageName ?? raw.pkg ?? 'Package',
       basePrice: Number(raw.basePrice ?? 0),
@@ -353,7 +360,7 @@ export default function DashboardPage() {
           try {
             const rent = (data as any)?.rental;
             if (rent && rent.id) {
-              const rentalWithEmail = { ...rent, email: c?.email || "" };
+              const rentalWithEmail = { ...rent, email: c?.email || "", resortName: rent?.resortName ?? (resortName || '') };
               setRunning((prev) => ([...prev, normalizeRental(rentalWithEmail)]));
               setResultMsg('Rental started. Credentials ready.');
               return;
@@ -370,7 +377,7 @@ export default function DashboardPage() {
               credentialPassword: c?.password || undefined,
             });
             if (r && r.id) {
-              setRunning((prev) => ([...prev, normalizeRental(r)]));
+              setRunning((prev) => ([...prev, normalizeRental({ ...r, resortName: r?.resortName ?? (resortName || '') })]));
               setResultMsg('Rental started. Credentials ready.');
             } else {
               setResultMsg('Rental start did not return an id. Please check backend.');
@@ -385,6 +392,7 @@ export default function DashboardPage() {
                 id: `RUN-${Date.now()}`,
                 guestName: guestName || 'Guest',
                 roomNumber: roomNumber || '-',
+                resortName: resortName || '',
                 pkg: orderFor.id,
                 packageName: orderFor.title,
                 basePrice: orderFor.price,
@@ -691,6 +699,7 @@ export default function DashboardPage() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
+                <th className="px-3 py-2 font-medium">Resort</th>
                 <th className="px-3 py-2 font-medium">Guest</th>
                 <th className="px-3 py-2 font-medium">Room</th>
                 <th className="px-3 py-2 font-medium">Email</th>
@@ -703,7 +712,7 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {running.length === 0 ? (
-                <tr><td colSpan={7} className="px-3 py-4 text-center text-slate-500">No running rentals.</td></tr>
+                <tr><td colSpan={9} className="px-3 py-4 text-center text-slate-500">No running rentals.</td></tr>
               ) : (
                 running.map((r) => {
                   const base = r.baseMinutes;
@@ -722,6 +731,7 @@ export default function DashboardPage() {
                   const rowClass = r.status === 'unpaid' ? 'bg-rose-50' : '';
                   return (
                     <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
+                      <td className="px-3 py-2 text-slate-800">{r.resortName || '-'}</td>
                       <td className="px-3 py-2 text-slate-800">{r.guestName}</td>
                       <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
                       <td className="px-3 py-2 text-slate-800">{getRentalEmail(r)}</td>
@@ -876,7 +886,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-slate-600">Extra time</span>
-                      <span className="font-medium text-slate-900">{extraMinutes} min total / charge {extraBlocks} x 60 min</span>
+                      <span className="font-medium text-slate-900">{extraMinutes} min total / charge {extraBlocks} x {extras.block} min</span>
                     </div>
                   </div>
                   <div className="mt-4 rounded-xl bg-white p-4 ring-1 ring-slate-200">
@@ -890,7 +900,7 @@ export default function DashboardPage() {
                         <span className="text-slate-600">
                           Extra time (tolerance {extras.grace} min)
                           {extraBlocks > 0 && (
-                            <span className="text-slate-500"> - {extraBlocks} x 60 min</span>
+                            <span className="text-slate-500"> - {extraBlocks} x {extras.block} min</span>
                           )}
                         </span>
                         <span className="font-medium text-slate-900">{fmt(extrasCost)}</span>

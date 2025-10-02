@@ -5,7 +5,7 @@ import { Switch } from "@/app/components/ui/switch";
 import { api } from "@/app/lib/api";
 
 type PackageId = '1h' | '3h' | '1d';
-type RentalExtraKey = 'extraGraceMinutes' | 'extraHourlyRate';
+type RentalExtraKey = 'extraGraceMinutes' | 'extraBlockMinutes' | 'extraHourlyRate';
 
 type FeatureConfig = {
   packages: Record<PackageId, boolean>;
@@ -31,7 +31,8 @@ const PAYMENT_OPTIONS: PaymentToggle[] = [
 
 const RENTAL_EXTRA_FIELDS: { key: RentalExtraKey; label: string; description: string; unit?: string; prefix?: string }[] = [
   { key: 'extraGraceMinutes', label: 'Grace Period', description: 'Minutes before overtime charges apply.', unit: 'minutes' },
-  { key: 'extraHourlyRate', label: 'Extra Hourly Rate', description: 'Charge applied for each overtime block.', prefix: 'Rp' },
+  { key: 'extraBlockMinutes', label: 'Overtime Block Duration', description: 'Minutes grouped before overtime charges add up.', unit: 'minutes' },
+  { key: 'extraHourlyRate', label: 'Overtime Charge Per Block', description: 'Charge applied for each overtime block.', prefix: 'Rp' },
 ];
 
 export default function AdminSettingsPage() {
@@ -44,7 +45,7 @@ export default function AdminSettingsPage() {
   const [priceInputs, setPriceInputs] = useState<Record<PackageId, string>>({ '1h': '', '3h': '', '1d': '' });
   const [priceSaving, setPriceSaving] = useState<PackageId | null>(null);
 
-  const [extraInputs, setExtraInputs] = useState<Record<RentalExtraKey, string>>({ extraGraceMinutes: '', extraHourlyRate: '' });
+  const [extraInputs, setExtraInputs] = useState<Record<RentalExtraKey, string>>({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
   const [extraSaving, setExtraSaving] = useState<RentalExtraKey | null>(null);
 
   useEffect(() => {
@@ -67,7 +68,7 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     if (!features) {
       setPriceInputs({ '1h': '', '3h': '', '1d': '' });
-      setExtraInputs({ extraGraceMinutes: '', extraHourlyRate: '' });
+      setExtraInputs({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
       return;
     }
     setPriceInputs({
@@ -77,6 +78,7 @@ export default function AdminSettingsPage() {
     });
     setExtraInputs({
       extraGraceMinutes: features.rentalExtras?.extraGraceMinutes !== undefined ? String(features.rentalExtras.extraGraceMinutes) : '',
+      extraBlockMinutes: features.rentalExtras?.extraBlockMinutes !== undefined ? String(features.rentalExtras.extraBlockMinutes) : '',
       extraHourlyRate: features.rentalExtras?.extraHourlyRate !== undefined ? String(features.rentalExtras.extraHourlyRate) : '',
     });
   }, [features]);
