@@ -445,7 +445,7 @@ export default function DashboardPage() {
         const res = await api.post('/rentals/settle', payload);
         if (res?.status >= 200 && res?.status < 300) {
           setRunning((prev) => prev.filter((x) => x.id !== target.id));
-          setResultMsg('Cash payment recorded.\n\nThank you ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ the resort receptionist has been notified about this cash payment.');
+          setResultMsg('Cash payment recorded.\n\nThank you! The resort receptionist has been notified about this cash payment.');
           setPayConfirmOpen(false);
           setPayTarget(null);
           setSelectedPayment(null);
@@ -571,7 +571,7 @@ export default function DashboardPage() {
       </section>
 
       {resultMsg && (
-        <div className="rounded-xl bg-emerald-50 px-4 py-3 text-emerald-800 ring-1 ring-emerald-200">{resultMsg}</div>
+        <div className="rounded-xl bg-emerald-50 px-4 py-3 text-emerald-800 ring-1 ring-emerald-200 whitespace-pre-line">{resultMsg}</div>
       )}
 
       {/* Detail modal */}
@@ -1024,3 +1024,8 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+
+
+
+

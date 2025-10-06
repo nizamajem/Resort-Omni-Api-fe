@@ -13,6 +13,7 @@ export function Select({ className = "", error, helper, children, ...props }: Se
       <div className="relative">
         <select
           className="block w-full appearance-none rounded-md border bg-white px-3 py-2 pr-9 text-left outline-none focus:ring-2 focus:ring-sky-500 text-slate-900"
+          suppressHydrationWarning
           {...props}
         >
           {children}

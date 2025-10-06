@@ -66,6 +66,7 @@ export default function NavBar() {
     { href: "/profile", label: "Profile", show: true },
     { href: "/admin/resorts/add", label: "Add Resort", show: role === 'superadmin' },
     { href: "/admin/packages/add", label: "Packages", show: role === 'superadmin' },
+    { href: "/admin/business-visualization", label: "Business Visualization", show: role === 'superadmin' },
   ].filter((l) => l.show);
 
   const hideDesktopForSuper = role === 'superadmin' ? 'md:hidden' : '';
@@ -86,6 +87,7 @@ export default function NavBar() {
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setMenuOpen((s) => !s)}
+            suppressHydrationWarning
             className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 shadow-sm active:scale-[0.98]"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
@@ -102,7 +104,7 @@ export default function NavBar() {
                 </Link>
               ))}
               <div className="my-1 h-px bg-slate-200" />
-              <button onClick={onLogout} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50">
+              <button onClick={onLogout} suppressHydrationWarning className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3H6A2.25 2.25 0 0 0 3.75 5.25v13.5A2.25 2.25 0 0 0 6 21h7.5a2.25 2.25 0 0 0 2.25-2.25V15m-6 0 3-3m0 0-3-3m3 3H21"/></svg>
                 Logout
               </button>

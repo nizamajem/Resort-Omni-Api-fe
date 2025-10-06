@@ -58,6 +58,9 @@ export default function Sidebar() {
     { href: "/admin/packages/add", label: "Packages", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.375 7.5 12 12.75 20.625 7.5M12 21.75l-8.625-5.25V7.5L12 2.25l8.625 5.25v9L12 21.75Z"/></svg>
     ), show: isSuper },
+    { href: "/admin/business-visualization", label: "Business Visualization", icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 3v18h18M7.5 15l3-3 3 3 4.5-6"/></svg>
+    ), show: isSuper },
     { href: "/admin/settings", label: "Settings", icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm8.25 3c0-.64-.07-1.26-.2-1.86l2.02-1.56-1.5-2.6-2.47.93a6.75 6.75 0 0 0-3.05-1.78L14.5 3h-5l-.35 2.73a6.75 6.75 0 0 0-3.05 1.78l-2.47-.93-1.5 2.6 2.02 1.56a6.87 6.87 0 0 0 0 3.72L2.13 16.56l1.5 2.6 2.47-.93a6.75 6.75 0 0 0 3.05 1.78L9.5 21h5l.35-2.73a6.75 6.75 0 0 0 3.05-1.78l2.47.93 1.5-2.6-2.02-1.56c.13-.6.2-1.22.2-1.86Z"/></svg>
     ), show: isSuper },
@@ -100,6 +103,7 @@ export default function Sidebar() {
         <div className="pt-3">
           <button
             onClick={onLogout}
+            suppressHydrationWarning
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50"
           >
             Logout
