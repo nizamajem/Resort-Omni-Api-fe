@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import MidtransPopup from "@/app/components/midtrans.popup";
 import { api } from "@/app/lib/api";
 
-type Pkg = { id: "1h" | "3h" | "1d"; title: string; desc: string; price: number; unit: string };
+type Pkg = { id: "1h" | "3h" | "12h" | "1d"; title: string; desc: string; price: number; unit: string };
 
 type RentalExtrasConfig = { extraGraceMinutes: number; extraHourlyRate: number; extraBlockMinutes?: number };
 
@@ -45,6 +45,7 @@ export default function DashboardPage() {
     () => [
       { id: "1h", title: "1 Hour", desc: "Perfect for short city rides.", price: 65000, unit: "hour" },
       { id: "3h", title: "3 Hours", desc: "Explore more with extra time.", price: 125000, unit: "3 hours" },
+      { id: "12h", title: "12 Hours", desc: "Ideal for a long daytime tour.", price: 180000, unit: "12 hours" },
       { id: "1d", title: "1 Day", desc: "Full day adventure on e-bike.", price: 200000, unit: "day" },
     ],
     []
@@ -106,7 +107,7 @@ export default function DashboardPage() {
   const [resultMsg, setResultMsg] = useState<string | null>(null);
   const [lastOrderId, setLastOrderId] = useState<string | null>(null);
   const [cred, setCred] = useState<{ email: string; password: string } | null>(null);
-  const [availability, setAvailability] = useState<{ '1h': number; '3h': number; '1d': number; enabled?: Record<'1h' | '3h' | '1d', boolean> } | null>(null);
+  const [availability, setAvailability] = useState<AvailabilityState | null>(null);
   const [nowTick, setNowTick] = useState(0);
   const [loadedLocal, setLoadedLocal] = useState(false);
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
@@ -385,7 +386,7 @@ export default function DashboardPage() {
             }
           } catch (e: any) {
             // fallback to local so UI shows immediately, and inform user
-            const baseMinutes = orderFor.id === '1h' ? 60 : orderFor.id === '3h' ? 180 : 1440;
+            const baseMinutes = orderFor.id === '1h' ? 60 : orderFor.id === '3h' ? 180 : orderFor.id === '12h' ? 720 : 1440;
             setRunning((prev) => ([
               ...prev,
               normalizeRental({
@@ -444,7 +445,7 @@ export default function DashboardPage() {
         const res = await api.post('/rentals/settle', payload);
         if (res?.status >= 200 && res?.status < 300) {
           setRunning((prev) => prev.filter((x) => x.id !== target.id));
-          setResultMsg('Cash payment recorded.\n\nThank you � the resort receptionist has been notified about this cash payment.');
+          setResultMsg('Cash payment recorded.\n\nThank you ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ the resort receptionist has been notified about this cash payment.');
           setPayConfirmOpen(false);
           setPayTarget(null);
           setSelectedPayment(null);
@@ -646,7 +647,7 @@ export default function DashboardPage() {
             <h3 className="text-lg font-semibold text-slate-900">Start Rental</h3>
             <p className="mt-2 text-sm text-slate-600">Please confirm to start rental for {orderFor.title} ({fmt(orderFor.price)}).</p>
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-slate-200">
-              Guest: <span className="font-medium text-slate-900">{guestName}</span> • Room: <span className="font-medium text-slate-900">{roomNumber}</span>
+              Guest: <span className="font-medium text-slate-900">{guestName || "-"}</span> Room: <span className="font-medium text-slate-900">{roomNumber || "-"}</span>
             </div>
             <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
               <input type="checkbox" checked={agreeChecked} onChange={(e) => setAgreeChecked(e.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" />

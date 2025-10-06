@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Switch } from "@/app/components/ui/switch";
 import { api } from "@/app/lib/api";
 
-type PackageId = '1h' | '3h' | '1d';
+type PackageId = '1h' | '3h' | '12h' | '1d';
 type RentalExtraKey = 'extraGraceMinutes' | 'extraBlockMinutes' | 'extraHourlyRate';
 
 type FeatureConfig = {
@@ -20,6 +20,8 @@ type PaymentToggle = { id: 'cash' | 'midtransSandbox' | 'midtransProduction'; la
 const PACKAGE_OPTIONS: ToggleKey[] = [
   { id: '1h', label: '1 Hour Package', description: 'Enable resorts to order the 1 hour bundle.' },
   { id: '3h', label: '3 Hour Package', description: 'Enable resorts to order the 3 hour bundle.' },
+
+  { id: '12h', label: '12 Hour Package', description: 'Enable resorts to order the 12 hour bundle.' },
   { id: '1d', label: '1 Day Package', description: 'Enable resorts to order the 1 day bundle.' },
 ];
 
@@ -42,7 +44,7 @@ export default function AdminSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [priceInputs, setPriceInputs] = useState<Record<PackageId, string>>({ '1h': '', '3h': '', '1d': '' });
+  const [priceInputs, setPriceInputs] = useState<Record<PackageId, string>>({ '1h': '', '3h': '', '12h': '', '1d': '' });
   const [priceSaving, setPriceSaving] = useState<PackageId | null>(null);
 
   const [extraInputs, setExtraInputs] = useState<Record<RentalExtraKey, string>>({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
@@ -67,13 +69,14 @@ export default function AdminSettingsPage() {
 
   useEffect(() => {
     if (!features) {
-      setPriceInputs({ '1h': '', '3h': '', '1d': '' });
+      setPriceInputs({ '1h': '', '3h': '', '12h': '', '1d': '' });
       setExtraInputs({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
       return;
     }
     setPriceInputs({
       '1h': features.packagePrices?.['1h'] !== undefined ? String(features.packagePrices['1h']) : '',
       '3h': features.packagePrices?.['3h'] !== undefined ? String(features.packagePrices['3h']) : '',
+      '12h': features.packagePrices?.['12h'] !== undefined ? String(features.packagePrices['12h']) : '',
       '1d': features.packagePrices?.['1d'] !== undefined ? String(features.packagePrices['1d']) : '',
     });
     setExtraInputs({

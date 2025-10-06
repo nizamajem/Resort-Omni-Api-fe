@@ -7,7 +7,7 @@ import { Select } from "@/app/components/ui/select";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 
-type PkgId = "1h" | "3h" | "1d";
+type PkgId = "1h" | "3h" | "12h" | "1d";
 type PackageAccount = { id: string; pkg: PkgId; email: string; password: string; status: "active" | "sold"; createdAt?: string };
 
 const API_BASE = (() => {
@@ -33,7 +33,7 @@ export default function AdminPackagesAddPage() {
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "sold">("active");
   const [rows, setRows] = useState<PackageAccount[]>([]);
   const [loading, setLoading] = useState(false);
-  const [counts, setCounts] = useState<{ '1h': number; '3h': number; '1d': number }>({ '1h': 0, '3h': 0, '1d': 0 });
+  const [counts, setCounts] = useState<{ '1h': number; '3h': number; '12h': number; '1d': number }>({ '1h': 0, '3h': 0, '12h': 0, '1d': 0 });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editEmail, setEditEmail] = useState("");
   const [editPassword, setEditPassword] = useState("");
@@ -43,12 +43,19 @@ export default function AdminPackagesAddPage() {
   const [total, setTotal] = useState(0);
   const limit = 5;
 
-  const pkgLabel = (id: PkgId) => (id === "1h" ? "1 Hour" : id === "3h" ? "3 Hours" : "1 Day");
+  const pageRangeLabel = useMemo(() => {
+    if (total <= 0) return 'Showing 0 - 0 of 0';
+    const start = Math.min((page - 1) * limit + 1, total);
+    const end = Math.min(page * limit, total);
+    return `Showing ${start} - ${end} of ${total}`;
+  }, [page, total, limit]);
+
+  const pkgLabel = (id: PkgId) => (id === "1h" ? "1 Hour" : id === "3h" ? "3 Hours" : id === "12h" ? "12 Hours" : "1 Day");
 
   const fetchCounts = async () => {
     try {
-      const ids: PkgId[] = ["1h", "3h", "1d"];
-      const result: any = { '1h': 0, '3h': 0, '1d': 0 };
+      const ids: PkgId[] = ["1h", "3h", "12h", "1d"];
+      const result: any = { '1h': 0, '3h': 0, '12h': 0, '1d': 0 };
       for (const id of ids) {
         const url = new URL(`${API_BASE}/package-accounts`);
         url.searchParams.set("pkg", id);
@@ -100,13 +107,13 @@ export default function AdminPackagesAddPage() {
     setAddMsg(null);
     const items = lines
       .split(/\r?\n/)
-      .map((l) => l.trim())
+      .map((line) => line.trim())
       .filter(Boolean)
-      .map((l) => {
-        const [email, password] = l.split(/,|\s+/).map((x) => x.trim());
+      .map((line) => {
+        const [email, password] = line.split(/,|\s+/).map((value) => value.trim());
         return { email, password };
       })
-      .filter((x) => x.email && x.password);
+      .filter((entry) => entry.email && entry.password);
     if (items.length === 0) {
       setAddMsg("Please provide at least one line: email,password");
       return;
@@ -184,11 +191,12 @@ export default function AdminPackagesAddPage() {
     <main className="space-y-6 p-6">
       <section className="rounded-xl border bg-white p-5 shadow-sm">
         <h1 className="text-xl font-semibold text-slate-900">Add Package Accounts</h1>
-        <p className="mt-1 text-sm text-slate-600">Add credentials for the three fixed packages below. Each line is one account: email,password</p>
+        <p className="mt-1 text-sm text-slate-600">Add credentials for the four fixed packages below. Each line is one account: email,password</p>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           {[{ id: '1h', label: '1 Hour' },
           { id: '3h', label: '3 Hours' },
+          { id: '12h', label: '12 Hours' },
           { id: '1d', label: '1 Day' }].map((c: any) => (
             <div
               key={c.id}
@@ -212,6 +220,7 @@ export default function AdminPackagesAddPage() {
             <Select id="pkg" value={pkg} onChange={(e) => setPkg(e.target.value as PkgId)}>
               <option value="1h">1 Hour</option>
               <option value="3h">3 Hours</option>
+              <option value="12h">12 Hours</option>
               <option value="1d">1 Day</option>
             </Select>
           </div>
@@ -225,7 +234,7 @@ export default function AdminPackagesAddPage() {
               placeholder={"email1@example.com,password1\nemail2@example.com,password2"}
               className="h-32 w-full rounded-md border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500 text-slate-900 placeholder:text-slate-400"
             />
-            <div className="mt-1 text-xs text-slate-700">Format: email,password (comma or whitespace separated) · {lines.trim() ? lines.split(/\r?\n/).filter(l => l.trim()).length : 0} line(s)</div>
+            <div className="mt-1 text-xs text-slate-700">Format: email,password (comma or whitespace separated). {lines.trim() ? lines.split(/\r?\n/).filter((entry) => entry.trim()).length : 0} line(s)</div>
           </div>
 
           <div className="sm:col-span-3 flex items-center gap-2">
@@ -254,6 +263,7 @@ export default function AdminPackagesAddPage() {
                 <option value="all">All Packages</option>
                 <option value="1h">1 Hour</option>
                 <option value="3h">3 Hours</option>
+                <option value="12h">12 Hours</option>
                 <option value="1d">1 Day</option>
               </Select>
             </div>
@@ -325,15 +335,7 @@ export default function AdminPackagesAddPage() {
             </tbody>
           </table>
           <div className="flex items-center justify-between gap-3 px-2 py-3 text-sm text-slate-700">
-            <div>
-              {total > 0 ? (
-                <span>
-                  Showing {Math.min((page - 1) * limit + 1, total)}–{Math.min(page * limit, total)} of {total}
-                </span>
-              ) : (
-                <span>Showing 0–0 of 0</span>
-              )}
-            </div>
+            <div><span>{pageRangeLabel}</span></div>
             <div className="flex gap-2">
               <Button
                 variant="secondary"
@@ -354,8 +356,7 @@ export default function AdminPackagesAddPage() {
             </div>
           </div>
         </div>
-      </section>
-      {/* Disable confirm modal */}
+      </section>      {/* Disable confirm modal */}
       {confirmDisable && (
         <div className="fixed inset-0 z-50 grid place-items-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmDisable(null)} />
