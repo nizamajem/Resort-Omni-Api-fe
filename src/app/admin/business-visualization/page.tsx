@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
 import { useAuth } from "@/app/auth.context";
 import { useRouter } from "next/navigation";
@@ -9,11 +9,32 @@ import { api } from "@/app/lib/api";
 type PackageId = "1h" | "3h" | "12h" | "1d";
 type TrendMetric = "rides" | "minutes" | "revenue";
 type TrendPoint = { date: string; rides: number; minutes: number; revenue: number };
-type TopResort = { resortName: string; rides: number; minutes: number; revenue: number };
+type TopResort = {
+  resortName: string;
+  rides: number;
+  minutes: number;
+  revenue: number;
+  packageCounts?: Partial<Record<PackageId, number>>;
+};
 type InsightPayload = { text: string; generatedAt: string; source?: string; filters?: Record<string, unknown> } | null;
 type InsightSectionKey = "operationalInsights" | "businessAnalystInsights" | "actionableRecommendations";
 const formatIDR = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 const formatNumber = new Intl.NumberFormat("id-ID");
+const extractErrorMessage = (error: unknown, fallback: string) => {
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const maybeResponse = (error as { response?: { data?: { error?: string } } }).response;
+    if (maybeResponse?.data?.error && typeof maybeResponse.data.error === "string") {
+      return maybeResponse.data.error;
+    }
+    if ("message" in error && typeof (error as { message?: unknown }).message === "string") {
+      return (error as { message: string }).message;
+    }
+  }
+  return fallback;
+};
 const parseInsightText = (text: string) => {
   const sections = {
     summary: [] as string[],
@@ -149,6 +170,11 @@ const TIMEFRAME_OPTIONS = [
   { id: "30d", label: "Last 30 Days" },
   { id: "custom", label: "Custom Range" },
 ] as const;
+const METRIC_TABS: { id: TrendMetric; label: string }[] = [
+  { id: "rides", label: "Rides" },
+  { id: "minutes", label: "Minutes" },
+  { id: "revenue", label: "Revenue" },
+];
 type ChartPoint = {
   label: string;
   value: number;
@@ -160,127 +186,164 @@ type TrendChartProps = {
   color: string;
   valueFormatter: (value: number) => string;
 };
-function PackageDistribution({ data, total }: { data: Record<PackageId, number>; total: number }) {
-  const entries = (Object.keys(data) as PackageId[]).map((pkg) => ({ key: pkg, value: data[pkg] || 0 }));
-  return (
-    <div className="space-y-3">
-      {entries.map(({ key, value }) => {
-        const percent = total > 0 ? (value / total) * 100 : 0;
-        const label = PACKAGE_OPTIONS.find((p) => p.id === key)?.label ?? key;
-        return (
-          <div key={key}>
-            <div className="flex items-center justify-between text-sm text-slate-600">
-              <span className="font-medium text-slate-800">{label}</span>
-              <span>{`${formatNumber.format(value)} rides (${percent.toFixed(1)}%)`}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 function TrendChart({ points, metricLabel, color, valueFormatter }: TrendChartProps) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [containerWidth, setContainerWidth] = useState(360);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const gradientId = useMemo(() => `trend-gradient-${Math.random().toString(36).slice(2)}`, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const element = containerRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry?.contentRect?.width) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const hasData = points.length > 0;
-  const width = Math.max(points.length * 22, 360);
   const height = 160;
+  const chartPadding = 16;
+  const chartTopPadding = 12;
+  const chartBottomPadding = 32;
+  const minimumStep = 56;
+  const chartHeight = Math.max(height - chartTopPadding - chartBottomPadding, 80);
+  const baselineY = chartTopPadding + chartHeight;
+  const requiredEffectiveWidth = Math.max((points.length - 1) * minimumStep, 0);
+  const effectiveWidth = Math.max(containerWidth - chartPadding * 2, Math.max(requiredEffectiveWidth, 120));
+  const step = points.length > 1 ? effectiveWidth / (points.length - 1) : 0;
+  const width = chartPadding * 2 + effectiveWidth;
   const values = points.map((point) => point.value);
   const maxValue = values.length ? Math.max(...values) : 1;
   const minValue = values.length ? Math.min(...values) : 0;
   const span = maxValue - minValue || 1;
-  const step = points.length > 1 ? width / (points.length - 1) : width;
-  const hover = hoverIndex !== null ? points[hoverIndex] : null;
+  const coordinates = points.map((point, index) => {
+    const norm = (point.value - minValue) / span;
+    const x = chartPadding + (points.length > 1 ? index * step : effectiveWidth / 2);
+    const y = chartTopPadding + chartHeight - norm * chartHeight;
+    return { point, x, y };
+  });
+  const hoverData = hoverIndex !== null ? coordinates[hoverIndex] : null;
+  const tooltipLeft = useMemo(() => {
+    if (!hoverData) return null;
+    const TOOLTIP_WIDTH = 184;
+    const half = TOOLTIP_WIDTH / 2;
+    const min = chartPadding + half;
+    const max = chartPadding + effectiveWidth - half;
+    if (min > max) return chartPadding + effectiveWidth / 2;
+    return Math.max(min, Math.min(max, hoverData.x));
+  }, [hoverData, chartPadding, effectiveWidth]);
+  const scrollToCoordinate = useCallback(
+    (x: number) => {
+      const wrapper = scrollRef.current;
+      if (!wrapper) return;
+      const visibleWidth = wrapper.clientWidth;
+      const maxScroll = Math.max(0, wrapper.scrollWidth - visibleWidth);
+      const target = Math.min(maxScroll, Math.max(0, x - visibleWidth / 2));
+      wrapper.scrollTo({ left: target, behavior: "smooth" });
+    },
+    []
+  );
   const handlePointer = (event: ReactMouseEvent<SVGSVGElement> | ReactTouchEvent<SVGSVGElement>) => {
     if (!hasData) return;
     const clientX = "touches" in event ? event.touches[0]?.clientX : event.clientX;
     const target = event.currentTarget.getBoundingClientRect();
     const relativeX = Math.min(Math.max(clientX - target.left, 0), target.width);
-    const index = points.length > 1 ? Math.round(relativeX / (target.width / (points.length - 1))) : 0;
-    setHoverIndex(Math.min(points.length - 1, Math.max(0, index)));
+    const scale = width / target.width;
+    const pointerX = relativeX * scale;
+    const clamped = Math.min(Math.max(pointerX - chartPadding, 0), effectiveWidth);
+    const index = points.length > 1 && step > 0 ? Math.round(clamped / step) : 0;
+    const nextIndex = Math.min(points.length - 1, Math.max(0, index));
+    setHoverIndex(nextIndex);
+    scrollToCoordinate(chartPadding + (points.length > 1 ? nextIndex * step : effectiveWidth / 2));
   };
   return (
-    <div className="space-y-3">
-      <div
-        className="relative overflow-hidden rounded-xl border border-slate-200 bg-white"
-        onMouseLeave={() => setHoverIndex(null)}
-      >
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="h-40 w-full"
-          onMouseMove={handlePointer}
-          onTouchMove={handlePointer}
-          onTouchStart={handlePointer}
+    <div ref={containerRef} className="space-y-3">
+      <div ref={scrollRef} className="overflow-x-auto">
+        <div
+          className="relative overflow-hidden rounded-xl border border-slate-200 bg-white"
+          onMouseLeave={() => setHoverIndex(null)}
+          style={{ minWidth: `${width}px` }}
         >
-          <defs>
-            <linearGradient id="trendGradient" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity="0.35" />
-              <stop offset="100%" stopColor={color} stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          {hasData ? (
-            <>
-              <polyline
-                points={`0,${height} ${points
-                  .map((point, index) => {
-                    const x = index * step;
-                    const norm = (point.value - minValue) / span;
-                    const y = height - norm * height;
-                    return `${x},${y}`;
-                  })
-                  .join(" ")} ${width},${height}`}
-                fill="url(#trendGradient)"
-                stroke="none"
-              />
-              <polyline
-                points={points
-                  .map((point, index) => {
-                    const x = index * step;
-                    const norm = (point.value - minValue) / span;
-                    const y = height - norm * height;
-                    return `${x},${y}`;
-                  })
-                  .join(" ")}
-                fill="none"
-                stroke={color}
-                strokeWidth={3}
-                strokeLinecap="round"
-              />
-              {points.map((point, index) => {
-                const norm = (point.value - minValue) / span;
-                const cx = index * step;
-                const cy = height - norm * height;
-                const isActive = index === hoverIndex;
-                return (
-                  <circle
-                    key={point.label}
-                    cx={cx}
-                    cy={cy}
-                    r={isActive ? 5 : 3}
-                    fill={isActive ? color : "#ffffff"}
-                    stroke={color}
-                    strokeWidth={isActive ? 2 : 1.5}
-                  />
-                );
-              })}
-            </>
-          ) : null}
-        </svg>
-        {hover && (
-          <div
-            className="pointer-events-none absolute top-3 w-40 -translate-x-1/2 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-lg"
-            style={{ left: `${points.length > 1 ? (hoverIndex! / (points.length - 1)) * 100 : 0}%` }}
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            style={{ width: `${width}px`, height: `${height}px` }}
+            onMouseMove={handlePointer}
+            onTouchMove={handlePointer}
+            onTouchStart={handlePointer}
           >
-            <div className="font-semibold text-slate-900">{hover.label}</div>
-            <div className="mt-1 text-slate-600">{valueFormatter(hover.value)} {metricLabel}</div>
-          </div>
-        )}
-      </div>
-      <div className="flex gap-3 overflow-x-auto border-t border-slate-200 pt-2 text-xs text-slate-500">
-        {points.map((point) => (
-          <span key={point.label} className="min-w-[60px] text-center">
-            {point.label}
-          </span>
-        ))}
+            <defs>
+              <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+                <stop offset="100%" stopColor={color} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {hasData ? (
+              <>
+                <polygon
+                  points={`${coordinates.map(({ x, y }) => `${x},${y}`).join(" ")} ${chartPadding + effectiveWidth},${baselineY} ${chartPadding},${baselineY}`}
+                  fill={`url(#${gradientId})`}
+                />
+                <polyline
+                  points={coordinates.map(({ x, y }) => `${x},${y}`).join(" ")}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                />
+                {coordinates.map(({ point, x, y }, index) => {
+                  const isActive = index === hoverIndex;
+                  return (
+                    <circle
+                      key={point.raw.date ?? `${point.label}-${index}`}
+                      cx={x}
+                      cy={y}
+                      r={isActive ? 5 : 3}
+                      fill={isActive ? color : "#ffffff"}
+                      stroke={color}
+                      strokeWidth={isActive ? 2 : 1.5}
+                      onMouseEnter={() => {
+                        setHoverIndex(index);
+                        scrollToCoordinate(x);
+                      }}
+                      onFocus={() => {
+                        setHoverIndex(index);
+                        scrollToCoordinate(x);
+                      }}
+                    />
+                  );
+                })}
+              </>
+            ) : null}
+          </svg>
+          {hoverData && tooltipLeft !== null && (
+            <div
+              className="pointer-events-none absolute top-3 w-44 -translate-x-1/2 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-lg backdrop-blur"
+              style={{ left: `${tooltipLeft}px` }}
+            >
+              <div className="font-semibold text-slate-900">{hoverData.point.label}</div>
+              <div className="mt-1 text-slate-600">{valueFormatter(hoverData.point.value)} {metricLabel}</div>
+            </div>
+          )}
+        </div>
+        <div className="relative h-10 border-t border-slate-200 pt-2 text-xs text-slate-500" style={{ minWidth: `${width}px` }}>
+          {coordinates.map(({ point, x }, index) => (
+            <span
+              key={point.raw.date ?? `${point.label}-${index}`}
+              className="absolute left-0 top-0 flex w-16 -translate-x-1/2 flex-col items-center gap-1 text-[11px] font-medium text-slate-500"
+              style={{
+                left: `${(x / width) * 100}%`,
+              }}
+            >
+              <span className="block h-[3px] w-[3px] rounded-full bg-sky-500" />
+              <span>{point.label}</span>
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -354,8 +417,8 @@ export default function BusinessVisualizationPage() {
       if (resortFilter !== "all" && !unique.has(resortFilter)) {
         setResortFilter("all");
       }
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Failed to load analytics data.";
+    } catch (error) {
+      const message = extractErrorMessage(error, "Failed to load analytics data.");
       setError(message);
     } finally {
       setLoading(false);
@@ -366,7 +429,12 @@ export default function BusinessVisualizationPage() {
   }, [fetchData]);
   const trendPoints: ChartPoint[] = useMemo(() => {
     if (!data) return [];
-    return data.trend.map((point) => ({
+    const sortedTrend = [...data.trend].sort((a, b) => {
+      const left = new Date(a.date).getTime();
+      const right = new Date(b.date).getTime();
+      return left - right;
+    });
+    return sortedTrend.map((point) => ({
       label: new Date(point.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       value: trendMetric === "rides" ? point.rides : trendMetric === "minutes" ? point.minutes : point.revenue,
       raw: point,
@@ -454,8 +522,8 @@ export default function BusinessVisualizationPage() {
       if (options?.openOnSuccess) {
         setRecommendationModalOpen(true);
       }
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Failed to generate insights.";
+    } catch (error) {
+      const message = extractErrorMessage(error, "Failed to generate insights.");
       setError(message);
     } finally {
       setInsightBusy(false);
@@ -472,288 +540,554 @@ export default function BusinessVisualizationPage() {
     await handleGenerateInsights({ openOnSuccess: true });
   }, [insights?.text, handleGenerateInsights]);
 
-  const handleAskReflowAgent = useCallback(async () => {
-    setRecommendationModalOpen(false);
-    await handleGenerateInsights({ openOnSuccess: true });
-  }, [handleGenerateInsights]);
+  const handleExportPdf = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!data) return;
+    const { default: jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 14;
+    const marginBottom = 16;
+    const availableWidth = pageWidth - marginX * 2;
+    let cursorY = 22;
+    const ensureSpace = (heightNeeded: number) => {
+      if (cursorY + heightNeeded > pageHeight - marginBottom) {
+        doc.addPage();
+        cursorY = 22;
+      }
+    };
+    const addSpacer = (height: number) => {
+      cursorY += height;
+    };
+    const addTitle = (title: string, subtitle?: string) => {
+      ensureSpace(subtitle ? 16 : 12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, marginX, cursorY);
+      if (subtitle) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+        doc.setTextColor(71, 85, 105);
+        doc.text(subtitle, marginX, cursorY + 7);
+        cursorY += 12;
+      } else {
+        cursorY += 10;
+      }
+    };
+    const addSectionHeading = (text: string) => {
+      ensureSpace(10);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(30, 41, 59);
+      doc.text(text, marginX, cursorY);
+      cursorY += 7;
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(0.3);
+      doc.line(marginX, cursorY, marginX + 40, cursorY);
+      cursorY += 5;
+    };
+    const addParagraph = (text: string) => {
+      if (!text) return;
+      const lines = doc.splitTextToSize(text, availableWidth);
+      lines.forEach((line) => {
+        ensureSpace(6);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(71, 85, 105);
+        doc.text(line, marginX, cursorY);
+        cursorY += 5;
+      });
+      cursorY += 2;
+    };
+    const addKpiCards = (
+      cards: Array<{ label: string; value: string; detail?: string; accent?: [number, number, number] }>,
+    ) => {
+      if (!cards.length) return;
+      const cardGap = 6;
+      const columns = 2;
+      const cardWidth = (availableWidth - cardGap) / columns;
+      const cardHeight = 26;
+      cards.forEach((card, index) => {
+        const column = index % columns;
+        if (column === 0) ensureSpace(cardHeight + cardGap);
+        const x = marginX + column * (cardWidth + cardGap);
+        const accent = card.accent ?? [14, 116, 144];
+        doc.setDrawColor(accent[0], accent[1], accent[2]);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(x, cursorY, cardWidth, cardHeight, 2, 2, "FD");
+        doc.setFillColor(accent[0], accent[1], accent[2]);
+        doc.roundedRect(x, cursorY, 3, cardHeight, 1.5, 0, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
+        doc.text(card.label.toUpperCase(), x + 6, cursorY + 7);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.setTextColor(15, 23, 42);
+        doc.text(card.value, x + 6, cursorY + 16);
+        if (card.detail) {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(100, 116, 139);
+          const detailLines = doc.splitTextToSize(card.detail, cardWidth - 12);
+          detailLines.forEach((line, idx) => {
+            doc.text(line, x + 6, cursorY + 20 + idx * 4);
+          });
+        }
+        if (column === columns - 1 || index === cards.length - 1) {
+          cursorY += cardHeight + cardGap;
+        }
+      });
+      cursorY += 4;
+    };
+    type TableColumn = { header: string; widthRatio: number; align?: "left" | "center" | "right" };
+    const addTable = (title: string, columns: TableColumn[], rows: string[][], note?: string) => {
+      if (!rows.length) return;
+      addSectionHeading(title);
+      const headerHeight = 8;
+      const rowHeight = 7;
+      const tableWidth = availableWidth;
+      ensureSpace(headerHeight + rowHeight * rows.length + (note ? 12 : 4));
+      doc.setDrawColor(203, 213, 225);
+      doc.setFillColor(226, 232, 240);
+      let x = marginX;
+      columns.forEach((column) => {
+        const columnWidth = column.widthRatio * tableWidth;
+        doc.rect(x, cursorY, columnWidth, headerHeight, "FD");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(51, 65, 85);
+        const headerX =
+          column.align === "right"
+            ? x + columnWidth - 2
+            : column.align === "center"
+            ? x + columnWidth / 2
+            : x + 2;
+        doc.text(column.header, headerX, cursorY + 5.5, { align: column.align ?? "left" });
+        x += columnWidth;
+      });
+      cursorY += headerHeight;
+      rows.forEach((cells) => {
+        ensureSpace(rowHeight);
+        x = marginX;
+        columns.forEach((column, index) => {
+          const columnWidth = column.widthRatio * tableWidth;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(71, 85, 105);
+          const cellValue = cells[index] ?? "";
+          const alignX =
+            column.align === "right"
+              ? x + columnWidth - 2
+              : column.align === "center"
+              ? x + columnWidth / 2
+              : x + 2;
+          doc.text(cellValue, alignX, cursorY + 4.5, { align: column.align ?? "left" });
+          doc.setDrawColor(226, 232, 240);
+          doc.rect(x, cursorY, columnWidth, rowHeight);
+          x += columnWidth;
+        });
+        cursorY += rowHeight;
+      });
+      if (note) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        cursorY += 4;
+        const noteLines = doc.splitTextToSize(note, availableWidth);
+        noteLines.forEach((line) => {
+          ensureSpace(5);
+          doc.text(line, marginX, cursorY);
+          cursorY += 4;
+        });
+      } else {
+        cursorY += 4;
+      }
+    };
+    const addBullets = (title: string, items: string[]) => {
+      if (!items.length) return;
+      addSectionHeading(title);
+      items.forEach((item) => {
+        ensureSpace(6);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(14, 116, 144);
+        doc.text("•", marginX, cursorY);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(71, 85, 105);
+        const textLines = doc.splitTextToSize(item, availableWidth - 8);
+        textLines.forEach((line, idx) => {
+          doc.text(line, marginX + 6, cursorY + idx * 5);
+        });
+        cursorY += textLines.length * 5 + 2;
+      });
+      cursorY += 2;
+    };
+    const titleSubtitle = `Filters · Resorts: ${
+      data.filters.resorts.length ? data.filters.resorts.join(", ") : "All"
+    } · Packages: ${data.filters.packages.length ? data.filters.packages.join(", ") : "All"} · ${
+      data.range.timeframeDays
+    } day window`;
+    addTitle("Business Performance Briefing", titleSubtitle);
+    const revenueSegments = formatCurrencySegments(data.totals.revenue);
+    const revenueValue = `${revenueSegments.symbol} ${revenueSegments.segments.join(".")}`;
+    addKpiCards([
+      { label: "Total Rides", value: formatNumber.format(data.totals.rides), detail: "Completed sessions" },
+      { label: "Gross Revenue", value: revenueValue, detail: "Inclusive of cash & online" },
+      {
+        label: "Active Minutes",
+        value: formatNumber.format(data.totals.minutes),
+        detail: `Average session ${formatNumber.format(data.totals.averageMinutes)} mins`,
+      },
+      {
+        label: "Resort Footprint",
+        value: formatNumber.format(data.totals.resortCount),
+        detail: "Operational locations in range",
+      },
+    ]);
+    const packagesEntries = (Object.keys(data.packages) as PackageId[])
+      .map((pkg) => ({ id: pkg, value: data.packages[pkg] || 0 }))
+      .sort((a, b) => b.value - a.value);
+    addTable(
+      "Package Mix",
+      [
+        { header: "Package", widthRatio: 0.45 },
+        { header: "Fulfilled Rides", widthRatio: 0.55, align: "right" },
+      ],
+      packagesEntries.map(({ id, value }) => [
+        id.toUpperCase(),
+        formatNumber.format(value),
+      ]),
+    );
+    const sortedTrend = [...data.trend].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+    );
+    const trendWindow = 12;
+    const trimmedTrend = sortedTrend.slice(-trendWindow);
+    addTable(
+      "Daily Trend Snapshot",
+      [
+        { header: "Date", widthRatio: 0.34 },
+        { header: "Rides", widthRatio: 0.22, align: "right" },
+        { header: "Minutes", widthRatio: 0.22, align: "right" },
+        { header: "Revenue", widthRatio: 0.22, align: "right" },
+      ],
+      trimmedTrend.map((point) => [
+        new Date(point.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        formatNumber.format(point.rides),
+        formatNumber.format(point.minutes),
+        formatIDR.format(point.revenue),
+      ]),
+      sortedTrend.length > trendWindow ? "Showing the most recent 12 days of activity." : undefined,
+    );
+    const resortRows = data.topResorts.map((resort, rank) => {
+      const packageCounts = resort.packageCounts ?? {};
+      return [
+        `#${rank + 1} ${resort.resortName}`,
+        formatIDR.format(resort.revenue),
+        formatNumber.format(resort.rides),
+        formatNumber.format(resort.minutes),
+        `${formatNumber.format(packageCounts["1h"] ?? 0)}/${formatNumber.format(
+          packageCounts["3h"] ?? 0,
+        )}/${formatNumber.format(packageCounts["12h"] ?? 0)}/${formatNumber.format(packageCounts["1d"] ?? 0)}`,
+      ];
+    });
+    addTable(
+      "Top Performing Resorts",
+      [
+        { header: "Resort", widthRatio: 0.34 },
+        { header: "Revenue", widthRatio: 0.22, align: "right" },
+        { header: "Rides", widthRatio: 0.15, align: "right" },
+        { header: "Minutes", widthRatio: 0.15, align: "right" },
+        { header: "Pkg 1h/3h/12h/1d", widthRatio: 0.14, align: "right" },
+      ],
+      resortRows,
+    );
+    ensureSpace(12);
+    const generatedStamp = new Date().toLocaleString("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Generated on ${generatedStamp}`, marginX, cursorY);
+    cursorY += 4;
+    doc.text("Powered by Business Visualization Dashboard", marginX, cursorY);
+    const fileName = `business-visualization-${data.range.start}-to-${data.range.end}.pdf`;
+    doc.save(fileName);
+  }, [data, structuredInsights, insights?.text]);
 
   const closeRecommendationModal = useCallback(() => {
     setRecommendationModalOpen(false);
   }, []);
   if (resolvedRole && resolvedRole !== "superadmin") {
     return (
-      <main className="flex h-full items-center justify-center p-6 text-slate-600">
+      <main className="flex min-h-[50vh] items-center justify-center bg-slate-50 p-6 text-slate-600">
         Business visualization is available for super admins only.
-        </main>
+      </main>
     );
   }
   return (
     <>
-      <main className="space-y-8 p-6">
-        <header className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Business Visualization</h1>
-            <p className="text-sm text-slate-600">
-              Monitor resort performance, riding behaviour, and package trends in one integrated view.
-            </p>
-            {data?.lastUpdated && (
-              <div className="mt-1 text-xs text-slate-500">
-                Last updated {new Date(data.lastUpdated).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" className="whitespace-nowrap" disabled>
-              Export CSV (coming soon)
-            </Button>
-          </div>
-        </div>
-        <div className="text-xs text-slate-500">
-          Reporting Range: {data ? `${data.range.start} until ${data.range.end}` : "-"}
-        </div>
-        {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">{error}</div>}
-        </header>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Analytics Filters</h2>
-        <p className="text-sm text-slate-600">Focus the report by resort, package, and date range.</p>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Resort</label>
-            <Select value={resortFilter} onChange={(e) => setResortFilter(e.target.value)}>
-              {resortOptions.map((resort) => (
-                <option key={resort.id} value={resort.id}>{resort.label}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Package</label>
-            <Select value={packageFilter} onChange={(e) => setPackageFilter(e.target.value)}>
-              {PACKAGE_OPTIONS.map((pkg) => (
-                <option key={pkg.id} value={pkg.id}>{pkg.label}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Timeframe</label>
-            <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
-              {TIMEFRAME_OPTIONS.map((item) => (
-                <option key={item.id} value={item.id}>{item.label}</option>
-              ))}
-            </Select>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
+      <main className="min-h-screen bg-slate-100 p-6">
+        <div className="mx-auto max-w-7xl space-y-6">
+        <header className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">From</label>
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(event) => setCustomFrom(event.target.value)}
-                disabled={timeframe !== "custom"}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-100"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">To</label>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(event) => setCustomTo(event.target.value)}
-                disabled={timeframe !== "custom"}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-100"
-              />
-            </div>
-          </div>
-        </div>
-        {timeframe === "custom" && (!(customFrom && customTo)) && (
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Provide both start and end dates to see data for this custom range.
-          </div>
-        )}
-      </section>
-      {loading && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-600">
-          Loading visualization data...
-        </div>
-      )}
-      {!loading && data && (
-        <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl bg-gradient-to-br from-sky-500 to-sky-600 p-4 text-white shadow-lg">
-              <div className="text-xs uppercase tracking-wide text-white/80">Total rides</div>
-              <div className="mt-2 text-3xl font-semibold">{formatNumber.format(data.totals.rides)}</div>
-              <p className="mt-1 text-xs text-white/80">Across {formatNumber.format(data.totals.resortCount)} resort(s)</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Active riding minutes</div>
-              <div className="mt-2 text-3xl font-semibold text-slate-900">{formatNumber.format(data.totals.minutes)}</div>
-              <p className="mt-1 text-xs text-slate-500">Average session: {formatNumber.format(data.totals.averageMinutes)} minutes</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Gross revenue</div>
-              <div className="mt-2 flex items-baseline gap-1 text-emerald-600">
-                <span className="text-sm font-semibold sm:text-base">{revenueDisplay.symbol}</span>
-                <span className="text-2xl font-semibold leading-tight tracking-tight text-emerald-600 whitespace-nowrap">{revenueDisplay.segments.join('.')}</span>
-              </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">Based on cash and online transactions (extra charges included)</p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Package mix size</div>
-              <div className="mt-2 text-3xl font-semibold text-slate-900">{formatNumber.format(packageTotal)}</div>
-              <p className="mt-1 text-xs text-slate-500">Fulfilled packages in range</p>
-            </div>
-          </section>
-          <section className="grid gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Riding trend</h2>
-                  <p className="text-sm text-slate-600">Daily movement for the selected window.</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant={trendMetric === "rides" ? "primary" : "secondary"} onClick={() => setTrendMetric("rides")}>
-                    Rides
-                  </Button>
-                  <Button variant={trendMetric === "minutes" ? "primary" : "secondary"} onClick={() => setTrendMetric("minutes")}>
-                    Minutes
-                  </Button>
-                  <Button variant={trendMetric === "revenue" ? "primary" : "secondary"} onClick={() => setTrendMetric("revenue")}>
-                    Revenue
-                  </Button>
-                </div>
-              </div>
-              <div className="mt-6">
-                <TrendChart
-                  points={trendPoints}
-                  metricLabel={metricLabel}
-                  color="#0284c7"
-                  valueFormatter={valueFormatter}
-                />
-              </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-3">
-                {trendPoints.slice(-3).map((point) => (
-                  <div key={point.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                    <div className="font-semibold text-slate-900">{point.label}</div>
-                    <div className="mt-1 text-sm font-semibold text-slate-800">{valueFormatter(point.value)}</div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-400">Most recent daily total</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold text-slate-900">Package composition</h2>
-              <p className="text-sm text-slate-600">Distribution of fulfilled packages in the selected window.</p>
-              <div className="mt-4 rounded-xl bg-slate-50 p-4">
-                <PackageDistribution data={data.packages} total={packageTotal} />
-              </div>
-            </div>
-          </section>
-          <section className="grid gap-6 lg:grid-cols-5">
-            <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">Top performing resorts</h2>
-                <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700">Revenue focus</span>
-              </div>
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full text-left text-sm">
-                  <thead>
-                    <tr className="text-slate-500">
-                      <th className="px-3 py-2 font-medium">Resort</th>
-                      <th className="px-3 py-2 font-medium">Rides</th>
-                      <th className="px-3 py-2 font-medium">Minutes</th>
-                      <th className="px-3 py-2 font-medium">Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topResorts.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="px-3 py-6 text-center text-slate-500">No data matches the current filter selection.</td>
-                      </tr>
-                    )}
-                    {topResorts.map((row) => (
-                      <tr key={row.resortName} className="border-t border-slate-100">
-                        <td className="px-3 py-2 font-semibold text-slate-900">{row.resortName}</td>
-                        <td className="px-3 py-2 text-slate-700">{formatNumber.format(row.rides)}</td>
-                        <td className="px-3 py-2 text-slate-700">{formatNumber.format(row.minutes)}</td>
-                        <td className="px-3 py-2 text-emerald-600">{formatIDR.format(row.revenue)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div className="relative lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              {recommendationPending && (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 rounded-2xl bg-white/85 backdrop-blur-sm">
-                  <svg className="h-14 w-20 text-sky-500" viewBox="0 0 64 32" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="16" cy="24" r="8" className="opacity-80">
-                      <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 16 24" to="360 16 24" dur="1s" repeatCount="indefinite" />
-                    </circle>
-                    <circle cx="48" cy="24" r="8" className="opacity-80">
-                      <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 48 24" to="360 48 24" dur="1s" repeatCount="indefinite" />
-                    </circle>
-                    <path d="M16 24L26 8h6l6 16" strokeLinecap="round" strokeLinejoin="round" className="opacity-80" />
-                    <path d="M28 8h10l8 12" strokeLinecap="round" strokeLinejoin="round" className="opacity-80" />
-                  </svg>
-                  <p className="text-sm font-medium text-slate-600">Reflow Agent is preparing fresh insights...</p>
+              <h1 className="text-2xl font-semibold text-slate-900">Business Visualization</h1>
+              <p className="text-sm text-slate-600">
+                Monitor resort performance, riding behaviour, and package trends in one integrated view.
+              </p>
+              {data?.lastUpdated && (
+                <div className="mt-1 text-xs text-slate-500">
+                  Last updated{" "}
+                  {new Date(data.lastUpdated).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
                 </div>
               )}
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Reflow agent recommendations</h2>
-                  <p className="text-sm text-slate-600">{hasRecommendation ? 'Review tailored guidance from the Reflow Agent.' : 'Let the Reflow Agent surface operational and business recommendations for this view.'}</p>
-                </div>
-                {hasRecommendation && lastRecommendationLabel && (
-                  <div className="text-right text-xs text-slate-500">
-                    
-                    <div>{lastRecommendationLabel}</div>
-                  </div>
-                )}
+            </div>
+            <div className="flex gap-2">
+              {/* <Button
+                variant="primary"
+                onClick={handleSeeRecommendation}
+                loading={insightBusy || recommendationPending}
+                disabled={!data || loading}
+                className="whitespace-nowrap"
+              >
+                See recommendation
+              </Button> */}
+              <Button
+                variant="primary"
+                className="whitespace-nowrap"
+                onClick={handleExportPdf}
+                disabled={!data || loading}
+              >
+                Export PDF
+              </Button>
+            </div>
+          </div>
+          <div className="text-xs text-slate-500">
+            Reporting Range: {data ? `${data.range.start} until ${data.range.end}` : "-"}
+          </div>
+          {error && (
+            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">{error}</div>
+          )}
+        </header>
+        <section className="rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Analytics Filters</h2>
+          <p className="text-sm text-slate-600">Focus the report by resort, package, and date range.</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Resort</label>
+              <Select value={resortFilter} onChange={(e) => setResortFilter(e.target.value)}>
+                {resortOptions.map((resort) => (
+                  <option key={resort.id} value={resort.id}>
+                    {resort.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Package</label>
+              <Select value={packageFilter} onChange={(e) => setPackageFilter(e.target.value)}>
+                {PACKAGE_OPTIONS.map((pkg) => (
+                  <option key={pkg.id} value={pkg.id}>
+                    {pkg.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Timeframe</label>
+              <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+                {TIMEFRAME_OPTIONS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">From</label>
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                  disabled={timeframe !== "custom"}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-100"
+                />
               </div>
-              <div className="mt-4 space-y-4">
-                {hasRecommendation ? (
-                  <div className="flex flex-wrap gap-3 text-xs text-slate-600">
-                    {insightSectionConfig.map(({ key, title, badgeClass }) => {
-                      const count = structuredInsights ? (structuredInsights[key] || []).length : 0;
-                      return (
-                        <span key={key} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium ${badgeClass}`}>
-                          <span>{title}</span>
-                          <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{count}</span>
-                        </span>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-xs leading-relaxed text-slate-600">
-                    No recommendations yet. Tap "See recommendation" to ask Reflow Agent for fresh analysis.
-                  </div>
-                )}
-                {hasRecommendation && structuredInsights?.summary?.length ? (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                    {structuredInsights.summary.slice(0, 2).map((paragraph, index) => (
-                      <p key={`summary-preview-${index}`} className={index > 0 ? 'mt-2' : undefined}>{paragraph}</p>
-                    ))}
-                    {structuredInsights.summary.length > 2 && (
-                      <p className="mt-3 text-xs text-slate-500">Full narrative available in the recommendation modal.</p>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-              <div className="mt-6 flex flex-wrap gap-2">
-                <Button onClick={handleSeeRecommendation} disabled={!data || loading || insightBusy || recommendationPending} variant="primary">
-                  See recommendation
-                </Button>
-                {hasRecommendation && (
-                  <Button onClick={handleAskReflowAgent} loading={insightBusy} disabled={!data || loading || recommendationPending} variant="secondary">
-                    Ask Reflow Agent
-                  </Button>
-                )}
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">To</label>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                  disabled={timeframe !== "custom"}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-100"
+                />
               </div>
             </div>
+          </div>
+          {timeframe === "custom" && (!(customFrom && customTo)) && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Provide both start and end dates to see data for this custom range.
+            </div>
+          )}
+        </section>
+        {loading && (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-600 shadow-sm">
+            Loading visualization data...
+          </div>
+        )}
+        {!loading && data && (
+          <>
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-3xl bg-gradient-to-br from-sky-500 to-sky-600 p-5 text-white shadow-md ring-1 ring-sky-500/30">
+                <div className="text-xs uppercase tracking-wide text-white/80">Total rides</div>
+                <div className="mt-2 text-3xl font-semibold">{formatNumber.format(data.totals.rides)}</div>
+                <p className="mt-1 text-xs text-white/80">
+                  Across {formatNumber.format(data.totals.resortCount)} resort(s)
+                </p>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="text-xs uppercase tracking-wide text-slate-500">Active riding minutes</div>
+                <div className="mt-2 text-3xl font-semibold text-slate-900">
+                  {formatNumber.format(data.totals.minutes)}
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Average session: {formatNumber.format(data.totals.averageMinutes)} minutes
+                </p>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Gross revenue</div>
+                <div className="mt-2 flex items-baseline gap-1 text-emerald-600">
+                  <span className="text-sm font-semibold sm:text-base">{revenueDisplay.symbol}</span>
+                  <span className="text-2xl font-semibold leading-tight tracking-tight text-emerald-600 whitespace-nowrap">
+                    {revenueDisplay.segments.join(".")}
+                  </span>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                  Based on cash and online transactions (extra charges included)
+                </p>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="text-xs uppercase tracking-wide text-slate-500">Package mix size</div>
+                <div className="mt-2 text-3xl font-semibold text-slate-900">{formatNumber.format(packageTotal)}</div>
+                <p className="mt-1 text-xs text-slate-500">Fulfilled packages in range</p>
+              </div>
+            </section>
+            <section className="grid gap-6 lg:grid-cols-1">
+              <div className="lg:col-span-2 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">Riding trend</h2>
+                    <p className="text-sm text-slate-600">Daily movement for the selected window.</p>
+                  </div>
+                  <div className="rounded-full bg-slate-100 p-1">
+                    <div className="flex gap-1">
+                      {METRIC_TABS.map((tab) => {
+                        const active = trendMetric === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setTrendMetric(tab.id)}
+                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 ${
+                              active
+                                ? "bg-white text-sky-600 shadow-sm focus-visible:ring-sky-500"
+                                : "text-slate-500 hover:text-slate-700 focus-visible:ring-sky-400/70"
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-6">
+                  <TrendChart
+                    points={trendPoints}
+                    metricLabel={metricLabel}
+                    color="#0284c7"
+                    valueFormatter={valueFormatter}
+                  />
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  {trendPoints.slice(-3).map((point) => (
+                    <div
+                      key={point.raw.date ?? point.label}
+                      className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-sm"
+                    >
+                      <div className="font-semibold text-slate-900">{point.label}</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-800">{valueFormatter(point.value)}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-slate-400">Most recent daily total</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
           </section>
-        </>
-      )}
+            <section className="grid gap-6 lg:grid-cols-2">
+              <div className="lg:col-span-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold text-slate-900">Top performing resorts</h2>
+                  <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700">
+                    Revenue focus
+                  </span>
+                </div>
+                <div className="mt-4 overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead>
+                      <tr className="text-slate-500">
+                        <th className="px-3 py-2 font-medium">Resort</th>
+                        <th className="px-3 py-2 font-medium">Rides</th>
+                        <th className="px-3 py-2 font-medium">1 Hour Packages</th>
+                        <th className="px-3 py-2 font-medium">3 Hour Packages</th>
+                        <th className="px-3 py-2 font-medium">12 Hour Packages</th>
+                        <th className="px-3 py-2 font-medium">Minutes</th>
+                        <th className="px-3 py-2 font-medium">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topResorts.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                            No data matches the current filter selection.
+                          </td>
+                        </tr>
+                      )}
+                      {topResorts.map((row) => {
+                        const packageCounts = row.packageCounts ?? ({} as Partial<Record<PackageId, number>>);
+                        return (
+                          <tr key={row.resortName} className="border-t border-slate-100">
+                            <td className="px-3 py-2 font-semibold text-slate-900">{row.resortName}</td>
+                            <td className="px-3 py-2 text-slate-700">{formatNumber.format(row.rides)}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {formatNumber.format(packageCounts["1h"] ?? 0)}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {formatNumber.format(packageCounts["3h"] ?? 0)}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {formatNumber.format(packageCounts["12h"] ?? 0)}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">{formatNumber.format(row.minutes)}</td>
+                            <td className="px-3 py-2 text-emerald-600">{formatIDR.format(row.revenue)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+        </div>
       </main>
 
       {recommendationModalOpen && (
