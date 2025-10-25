@@ -6,9 +6,11 @@ import { api } from "@/app/lib/api";
 
 type PackageId = '1h' | '3h' | '12h' | '1d';
 type RentalExtraKey = 'extraGraceMinutes' | 'extraBlockMinutes' | 'extraHourlyRate';
+type PackageRole = 'resort' | 'partnership';
 
 type FeatureConfig = {
   packages: Record<PackageId, boolean>;
+  packageRoles: Record<PackageId, PackageRole[]>;
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
   packagePrices: Record<PackageId, number>;
   rentalExtras: Record<RentalExtraKey, number>;
@@ -16,13 +18,18 @@ type FeatureConfig = {
 
 type ToggleKey = { id: PackageId; label: string; description: string };
 type PaymentToggle = { id: 'cash' | 'midtransSandbox' | 'midtransProduction'; label: string; description: string };
+type RoleToggle = { id: PackageRole; label: string };
 
 const PACKAGE_OPTIONS: ToggleKey[] = [
   { id: '1h', label: '1 Hour Package', description: 'Enable resorts to order the 1 hour bundle.' },
   { id: '3h', label: '3 Hour Package', description: 'Enable resorts to order the 3 hour bundle.' },
-
   { id: '12h', label: '12 Hour Package', description: 'Enable resorts to order the 12 hour bundle.' },
   { id: '1d', label: '1 Day Package', description: 'Enable resorts to order the 1 day bundle.' },
+];
+const PACKAGE_IDS: PackageId[] = PACKAGE_OPTIONS.map((pkg) => pkg.id);
+const ROLE_OPTIONS: RoleToggle[] = [
+  { id: 'resort', label: 'Resort Accounts' },
+  { id: 'partnership', label: 'Partnership Accounts' },
 ];
 
 const PAYMENT_OPTIONS: PaymentToggle[] = [
@@ -37,6 +44,26 @@ const RENTAL_EXTRA_FIELDS: { key: RentalExtraKey; label: string; description: st
   { key: 'extraHourlyRate', label: 'Overtime Charge Per Block', description: 'Charge applied for each overtime block.', prefix: 'Rp' },
 ];
 
+type RoleSelections = Record<PackageId, Record<PackageRole, boolean>>;
+
+const createDefaultRoleSelection = (): Record<PackageRole, boolean> => ({ resort: true, partnership: true });
+const computeRoleSelections = (config: FeatureConfig | null): RoleSelections => {
+  const base = {} as RoleSelections;
+  PACKAGE_IDS.forEach((id) => {
+    const defaults = createDefaultRoleSelection();
+    const allowed = Array.isArray(config?.packageRoles?.[id]) ? new Set(config?.packageRoles?.[id]) : null;
+    if (allowed) {
+      base[id] = {
+        resort: allowed.has('resort'),
+        partnership: allowed.has('partnership'),
+      };
+    } else {
+      base[id] = defaults;
+    }
+  });
+  return base;
+};
+
 export default function AdminSettingsPage() {
   const [features, setFeatures] = useState<FeatureConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +76,7 @@ export default function AdminSettingsPage() {
 
   const [extraInputs, setExtraInputs] = useState<Record<RentalExtraKey, string>>({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
   const [extraSaving, setExtraSaving] = useState<RentalExtraKey | null>(null);
+  const [roleSelections, setRoleSelections] = useState<RoleSelections>(() => computeRoleSelections(null));
 
   useEffect(() => {
     const load = async () => {
@@ -71,6 +99,7 @@ export default function AdminSettingsPage() {
     if (!features) {
       setPriceInputs({ '1h': '', '3h': '', '12h': '', '1d': '' });
       setExtraInputs({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
+      setRoleSelections(computeRoleSelections(null));
       return;
     }
     setPriceInputs({
@@ -84,6 +113,7 @@ export default function AdminSettingsPage() {
       extraBlockMinutes: features.rentalExtras?.extraBlockMinutes !== undefined ? String(features.rentalExtras.extraBlockMinutes) : '',
       extraHourlyRate: features.rentalExtras?.extraHourlyRate !== undefined ? String(features.rentalExtras.extraHourlyRate) : '',
     });
+    setRoleSelections(computeRoleSelections(features));
   }, [features]);
 
   const updateFeature = async (type: 'packages' | 'payments', id: string, next: boolean) => {
@@ -97,6 +127,27 @@ export default function AdminSettingsPage() {
       setMessage('Changes saved.');
     } catch {
       setError('Failed to save changes.');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+  const updatePackageRoles = async (pkgId: PackageId, roleId: PackageRole, next: boolean) => {
+    const currentSelection = roleSelections[pkgId] ?? createDefaultRoleSelection();
+    const nextSelection = { ...currentSelection, [roleId]: next };
+    setRoleSelections((prev) => ({ ...prev, [pkgId]: nextSelection }));
+    const allowedRoles = Object.entries(nextSelection)
+      .filter(([, value]) => value)
+      .map(([key]) => key as PackageRole);
+    try {
+      setSavingKey(`packageRoles:${pkgId}:${roleId}`);
+      setMessage(null);
+      setError(null);
+      const { data } = await api.put('/settings/features', { packageRoles: { [pkgId]: allowedRoles } });
+      setFeatures((data || null) as FeatureConfig | null);
+      setMessage('Changes saved.');
+    } catch {
+      setError('Failed to save changes.');
+      setRoleSelections(computeRoleSelections(features));
     } finally {
       setSavingKey(null);
     }
@@ -201,17 +252,39 @@ export default function AdminSettingsPage() {
             {PACKAGE_OPTIONS.map((pkg) => {
               const checked = features ? !!features.packages[pkg.id] : true;
               const busy = savingKey === `packages:${pkg.id}`;
+              const roleState = roleSelections[pkg.id] ?? createDefaultRoleSelection();
               return (
-                <div key={pkg.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-900">{pkg.label}</div>
-                    <div className="text-xs text-slate-600">{pkg.description}</div>
+                <div key={pkg.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{pkg.label}</div>
+                      <div className="text-xs text-slate-600">{pkg.description}</div>
+                    </div>
+                    <Switch
+                      checked={checked}
+                      disabled={loading || busy}
+                      onChange={(next) => updateFeature('packages', pkg.id, next)}
+                    />
                   </div>
-                  <Switch
-                    checked={checked}
-                    disabled={loading || busy}
-                    onChange={(next) => updateFeature('packages', pkg.id, next)}
-                  />
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Allowed Roles</div>
+                    <div className="mt-2 flex flex-wrap gap-4">
+                      {ROLE_OPTIONS.map((roleOption) => {
+                        const roleChecked = roleState[roleOption.id];
+                        const roleBusy = savingKey === `packageRoles:${pkg.id}:${roleOption.id}`;
+                        return (
+                          <div key={roleOption.id} className="flex items-center gap-2 text-xs text-slate-700">
+                            <Switch
+                              checked={roleChecked}
+                              disabled={loading || roleBusy}
+                              onChange={(next) => updatePackageRoles(pkg.id, roleOption.id, next)}
+                            />
+                            <span>{roleOption.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -244,6 +317,7 @@ export default function AdminSettingsPage() {
                     <div className="flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 shadow-sm">
                       <span className="mr-2 text-xs font-medium text-slate-500">Rp</span>
                       <input
+                        suppressHydrationWarning
                         value={inputValue}
                         onChange={(event) => handlePriceChange(pkgId, event.target.value)}
                         disabled={disabled}
@@ -311,6 +385,7 @@ export default function AdminSettingsPage() {
                     <div className="flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 shadow-sm">
                       {field.prefix ? <span className="mr-2 text-xs font-medium text-slate-500">{field.prefix}</span> : null}
                       <input
+                        suppressHydrationWarning
                         value={inputValue}
                         onChange={(event) => handleExtraChange(key, event.target.value)}
                         disabled={disabled}

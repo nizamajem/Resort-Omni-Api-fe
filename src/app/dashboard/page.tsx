@@ -3,16 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import MidtransPopup from "@/app/components/midtrans.popup";
 import { api } from "@/app/lib/api";
+import { useAuth } from "@/app/auth.context";
 
 type Pkg = { id: "1h" | "3h" | "12h" | "1d"; title: string; desc: string; price: number; unit: string };
 
 type RentalExtrasConfig = { extraGraceMinutes: number; extraHourlyRate: number; extraBlockMinutes?: number };
 
+type PackageRole = 'resort' | 'partnership';
 type FeatureConfig = {
   packages: Record<Pkg['id'], boolean>;
+  packageRoles: Record<Pkg['id'], PackageRole[]>;
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
   packagePrices: Record<Pkg['id'], number>;
   rentalExtras: RentalExtrasConfig;
+};
+type AvailabilityState = Record<Pkg['id'], number> & {
+  enabled: Record<Pkg['id'], boolean>;
 };
 
 type PaymentOption = 'cash' | 'midtransSandbox' | 'midtransProduction';
@@ -33,6 +39,8 @@ const PAYMENT_CONFIRM_COPY: Record<PaymentOption, string> = {
 
 
 export default function DashboardPage() {
+  const { role } = useAuth();
+  const effectiveRole: PackageRole | 'superadmin' = role === 'superadmin' ? 'superadmin' : role === 'partnership' ? 'partnership' : 'resort';
   const makeOrderId = (prefix: string, baseId: string) => {
     const cleanBase = baseId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     const timePart = Date.now().toString(36).toUpperCase();
@@ -65,6 +73,15 @@ export default function DashboardPage() {
     return { grace, rate, block };
   }, [features]);
 
+  const isPackageEnabledForRole = (pkgId: Pkg["id"]) => {
+    if (!features) return true;
+    if (features.packages?.[pkgId] === false) return false;
+    if (effectiveRole === 'superadmin') return true;
+    const allowed = features.packageRoles?.[pkgId];
+    if (!allowed || allowed.length === 0) return true;
+    return allowed.includes(effectiveRole);
+  };
+
   const packages = useMemo(() => {
     const withPricing = basePackages.map((pkg) => {
       const override = features?.packagePrices?.[pkg.id];
@@ -74,9 +91,8 @@ export default function DashboardPage() {
       }
       return pkg;
     });
-    if (!features) return withPricing;
-    return withPricing.filter((pkg) => features.packages?.[pkg.id] !== false);
-  }, [basePackages, features]);
+    return withPricing.filter((pkg) => isPackageEnabledForRole(pkg.id));
+  }, [basePackages, features, effectiveRole]);
 
   const cashEnabled = features ? !!features.payments.cash : true;
   const sandboxEnabled = features ? !!features.payments.midtransSandbox : true;
@@ -242,7 +258,8 @@ export default function DashboardPage() {
     if (!token) return;
     const run = async () => {
       try {
-        const { data } = await api.get("/orders/availability"); setAvailability(data as any);
+        const { data } = await api.get("/orders/availability");
+        setAvailability(data as AvailabilityState);
       } catch { }
     };
     run();
@@ -298,7 +315,7 @@ export default function DashboardPage() {
   }, [availablePayments, selectedPayment]);
   const canOrder = (id: Pkg["id"]) => {
     if (!hasAnyPayment) return false;
-    if (features && features.packages && features.packages[id] === false) return false;
+    if (!isPackageEnabledForRole(id)) return false;
     if (availability?.enabled && availability.enabled[id] === false) return false;
     if (!availability) return true; // optimistic until fetched
     return (availability[id] || 0) > 0;
@@ -524,14 +541,14 @@ export default function DashboardPage() {
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {packages.length === 0 ? (
           <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-600">
-            All packages are disabled by the super admin.
+            No packages are currently available for your role. Please contact the super admin.
           </div>
         ) : packages.map((p) => {
           const orderEnabled = canOrder(p.id);
           const disabledReason = !hasAnyPayment
             ? 'Payment method disabled'
-            : features && features.packages && features.packages[p.id] === false
-              ? 'Disabled by super admin'
+            : !isPackageEnabledForRole(p.id)
+              ? features?.packages?.[p.id] === false ? 'Disabled by super admin' : 'Not available for your role'
               : 'Unavailable: no active account';
           return (
             <article key={p.id} className="group rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 transition hover:shadow-md hover:-translate-y-0.5">

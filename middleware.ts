@@ -10,7 +10,7 @@ function isPublic(pathname: string) {
 }
 
 const isSuper = (r?: string | null) => r === 'superadmin';
-const isTenant = (r?: string | null) => r === 'tenant' || r === 'resort';
+const isTenant = (r?: string | null) => r === 'tenant' || r === 'resort' || r === 'partnership';
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

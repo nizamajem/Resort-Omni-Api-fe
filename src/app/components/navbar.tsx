@@ -42,6 +42,12 @@ export default function NavBar() {
   }, [ctxEmail]);
 
   useEffect(() => {
+    if (role && role !== roleState) {
+      setRole(role);
+    }
+  }, [role, roleState]);
+
+  useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       if (!menuRef.current) return;
       if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false);
@@ -60,16 +66,18 @@ export default function NavBar() {
     router.replace("/");
   };
 
+  const resolvedRole = role ?? roleState;
+
   const links = [
     { href: "/dashboard", label: "Dashboard", show: true },
     { href: "/history", label: "History", show: true },
     { href: "/profile", label: "Profile", show: true },
-    { href: "/admin/resorts/add", label: "Add Resort", show: role === 'superadmin' },
-    { href: "/admin/packages/add", label: "Packages", show: role === 'superadmin' },
-    { href: "/admin/business-visualization", label: "Business Visualization", show: role === 'superadmin' },
+    { href: "/admin/resorts/add", label: "Add Resort", show: resolvedRole === 'superadmin' },
+    { href: "/admin/packages/add", label: "Packages", show: resolvedRole === 'superadmin' },
+    { href: "/admin/business-visualization", label: "Business Visualization", show: resolvedRole === 'superadmin' },
   ].filter((l) => l.show);
 
-  const hideDesktopForSuper = role === 'superadmin' ? 'md:hidden' : '';
+  const hideDesktopForSuper = resolvedRole === 'superadmin' ? 'md:hidden' : '';
 
   return (
     <header className={`sticky top-0 z-40 border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 ${hideDesktopForSuper}`}>
@@ -80,7 +88,9 @@ export default function NavBar() {
           </div>
           <div className="leading-tight">
             <div className="text-sm font-semibold text-slate-900">Resort Dashboard</div>
-            <div className="text-[11px] text-slate-500 truncate max-w-[12rem]">{resortName || (role === 'superadmin' ? 'Super Admin' : email)}</div>
+            <div className="text-[11px] text-slate-500 truncate max-w-[12rem]">
+              {resortName || (resolvedRole === 'superadmin' ? 'Super Admin' : resolvedRole === 'partnership' ? 'Partnership Account' : (email || ''))}
+            </div>
           </div>
         </div>
 

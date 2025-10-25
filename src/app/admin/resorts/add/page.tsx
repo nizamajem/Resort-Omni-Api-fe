@@ -8,6 +8,7 @@ type Resort = {
   resortName: string;
   email: string;
   status: "active" | "disabled";
+  role: "resort" | "partnership";
   createdAt?: string;
 };
 
@@ -16,6 +17,7 @@ export default function AdminResortsAddPage() {
   const [resortName, setResortName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"resort" | "partnership">("resort");
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +64,7 @@ export default function AdminResortsAddPage() {
         resortName: r.resortName,
         email: r.email,
         status: r.status,
+        role: r.role === "partnership" ? "partnership" : "resort",
         createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
       }));
       setRows(items);
@@ -87,7 +90,7 @@ export default function AdminResortsAddPage() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await api.post("/resorts", { resortName, email, password });
+      const res = await api.post("/resorts", { resortName, email, password, role });
       const data = res?.data;
       if (data?.error) {
         setError(data?.error || data?.message || "Failed to create resort");
@@ -98,6 +101,7 @@ export default function AdminResortsAddPage() {
       setResortName("");
       setEmail("");
       setPassword("");
+      setRole("resort");
       await loadResorts();
     } catch (err: any) {
       setError(err?.message || "Request failed");
@@ -148,7 +152,7 @@ export default function AdminResortsAddPage() {
         setEditSaving(false);
         return;
       }
-      const patch: any = { id: editRow.id, resortName: editRow.resortName, email: editRow.email };
+      const patch: any = { id: editRow.id, resortName: editRow.resortName, email: editRow.email, role: editRow.role };
       if (editPw) patch.password = editPw;
       const res = await api.put("/resorts", patch);
       const data = res?.data;
@@ -181,8 +185,8 @@ export default function AdminResortsAddPage() {
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.118a7.5 7.5 0 0 1 15 0A17.933 17.933 0 0 1 12 21.75c-2.68 0-5.216-.586-7.5-1.632Z"/></svg>
             </div>
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Add Resort Account</h1>
-              <p className="text-sm text-slate-600">Create and manage partner resort logins.</p>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Add Partner Account</h1>
+              <p className="text-sm text-slate-600">Create and manage resort or partnership logins.</p>
             </div>
           </div>
         </div>
@@ -215,6 +219,17 @@ export default function AdminResortsAddPage() {
               placeholder="resort@partner.id"
               className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
             />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-700">Account Role</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as "resort" | "partnership")}
+              className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+            >
+              <option value="resort">Resort</option>
+              <option value="partnership">Partnership</option>
+            </select>
           </div>
           <div>
             <label className="block text-sm text-slate-700">Password</label>
@@ -253,7 +268,7 @@ export default function AdminResortsAddPage() {
 
       <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Resort Accounts</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Partner Accounts</h2>
           <div className="flex gap-2">
             <input
               type="search"
@@ -288,6 +303,7 @@ export default function AdminResortsAddPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">Resort</th>
                 <th className="px-4 py-3 font-medium">Email</th>
+                <th className="px-4 py-3 font-medium">Role</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Created</th>
                 <th className="px-4 py-3 font-medium">Actions</th>
@@ -298,6 +314,11 @@ export default function AdminResortsAddPage() {
                 <tr key={r.id} className="border-t border-slate-100">
                   <td className="px-4 py-3 text-slate-900">{r.resortName}</td>
                   <td className="px-4 py-3 text-slate-700">{r.email}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ${r.role === 'partnership' ? 'bg-violet-50 text-violet-700 ring-violet-200' : 'bg-blue-50 text-blue-700 ring-blue-200'}`}>
+                      {r.role === 'partnership' ? 'Partnership' : 'Resort'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ring-1 ${r.status === 'active' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-slate-100 text-slate-700 ring-slate-200'}`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${r.status === 'active' ? 'bg-emerald-500' : 'bg-slate-500'}`} />
@@ -322,7 +343,7 @@ export default function AdminResortsAddPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-500">{loading ? 'Loading...' : 'No data.'}</td>
+                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500">{loading ? 'Loading...' : 'No data.'}</td>
                 </tr>
               )}
             </tbody>
@@ -331,7 +352,9 @@ export default function AdminResortsAddPage() {
 
         {/* Pagination */}
         <div className="mt-4 flex items-center justify-between">
-          <div className="text-xs text-slate-600">Showing <span className="font-medium">{rows.length === 0 ? 0 : (page-1)*pageSize + 1}</span>–<span className="font-medium">{Math.min(rows.length, (page-1)*pageSize + pageSize)}</span> of <span className="font-medium">{rows.length}</span></div>
+          <div className="text-xs text-slate-600">
+            Showing <span className="font-medium">{rows.length === 0 ? 0 : (page - 1) * pageSize + 1}</span> to <span className="font-medium">{Math.min(rows.length, (page - 1) * pageSize + pageSize)}</span> of <span className="font-medium">{rows.length}</span>
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -366,6 +389,17 @@ export default function AdminResortsAddPage() {
               <div>
                 <label className="block text-sm text-slate-700">Email</label>
                 <input value={editRow.email} onChange={(e) => setEditRow((prev) => (prev ? { ...prev, email: e.target.value } : prev))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-700">Account Role</label>
+                <select
+                  value={editRow.role}
+                  onChange={(e) => setEditRow((prev) => (prev ? { ...prev, role: e.target.value as "resort" | "partnership" } : prev))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                >
+                  <option value="resort">Resort</option>
+                  <option value="partnership">Partnership</option>
+                </select>
               </div>
               <div>
                 <label className="block text-sm text-slate-700">New Password (optional)</label>

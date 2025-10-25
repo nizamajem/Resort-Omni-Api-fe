@@ -23,7 +23,7 @@ export default function ProfilePage() {
     setEmailInput(email ?? "");
   }, [email]);
 
-  const isResort = useMemo(() => role === 'resort', [role]);
+  const canManageProfile = useMemo(() => role === 'resort' || role === 'partnership', [role]);
 
   const resetMessages = () => {
     setNotice(null);
@@ -33,8 +33,8 @@ export default function ProfilePage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     resetMessages();
-    if (!isResort) {
-      setError('Only resort accounts can update profile information.');
+    if (!canManageProfile) {
+      setError('Only resort or partnership accounts can update profile information.');
       return;
     }
 
@@ -105,15 +105,15 @@ export default function ProfilePage() {
             </div>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Account Profile</h1>
-              <p className="text-sm text-slate-600">View and update your resort account details.</p>
+            <p className="text-sm text-slate-600">View and update your account details.</p>
             </div>
           </div>
         </div>
       </section>
 
-      {!isResort ? (
+      {!canManageProfile ? (
         <section className="rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-          <div className="text-sm text-slate-700">Only resort accounts can update profile details. If you are a super admin, use the Resorts management page to edit resort accounts.</div>
+          <div className="text-sm text-slate-700">Only resort or partnership accounts can update profile details. If you are a super admin, use the Resorts management page to edit resort or partnership accounts.</div>
         </section>
       ) : (
         <section className="rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-sm">
