@@ -13,7 +13,9 @@
     "react-dom": "19.1.0",
     "next": "15.5.2",
     "axios": "^1.7.7",
-    "jspdf": "^2.5.1"
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "typescript": "^5",

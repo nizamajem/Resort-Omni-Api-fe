@@ -368,7 +368,7 @@ export default function BusinessVisualizationPage() {
     }
   }, [resolvedRole, router]);
   const [resortOptions, setResortOptions] = useState<{ id: string; label: string }[]>([
-    { id: "all", label: "All Resorts" },
+    { id: "all", label: "All Account" },
   ]);
   const [resortFilter, setResortFilter] = useState<string>("all");
   const [packageFilter, setPackageFilter] = useState<string>("all");
@@ -405,7 +405,7 @@ export default function BusinessVisualizationPage() {
       const { data } = await api.get("/analytics/business-visualization", { params });
       setData(data as VisualizationResponse);
       const unique = new Map<string, { id: string; label: string }>();
-      unique.set("all", { id: "all", label: "All Resorts" });
+      unique.set("all", { id: "all", label: "All Accounts" });
       (data?.availableResorts ?? []).forEach((item: { id: string; label: string }) => {
         const id = item?.id || item?.label;
         if (!id) return;
@@ -795,9 +795,9 @@ export default function BusinessVisualizationPage() {
       ];
     });
     addTable(
-      "Top Performing Resorts",
+      "Top Performing Partnerships",
       [
-        { header: "Resort", widthRatio: 0.34 },
+        { header: "Partnership", widthRatio: 0.34 },
         { header: "Revenue", widthRatio: 0.22, align: "right" },
         { header: "Rides", widthRatio: 0.15, align: "right" },
         { header: "Minutes", widthRatio: 0.15, align: "right" },
@@ -839,7 +839,7 @@ export default function BusinessVisualizationPage() {
             <div>
               <h1 className="text-2xl font-semibold text-slate-900">Business Visualization</h1>
               <p className="text-sm text-slate-600">
-                Monitor resort performance, riding behaviour, and package trends in one integrated view.
+                Monitor Partnerships performance, riding behaviour, and package trends in one integrated view.
               </p>
               {data?.lastUpdated && (
                 <div className="mt-1 text-xs text-slate-500">
@@ -877,7 +877,7 @@ export default function BusinessVisualizationPage() {
         </header>
         <section className="rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Analytics Filters</h2>
-          <p className="text-sm text-slate-600">Focus the report by resort, package, and date range.</p>
+          <p className="text-sm text-slate-600">Focus the report by partnership, package, and date range.</p>
           <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div>
               <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Resort</label>
@@ -1034,7 +1034,7 @@ export default function BusinessVisualizationPage() {
             <section className="grid gap-6 lg:grid-cols-2">
               <div className="lg:col-span-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-semibold text-slate-900">Top performing resorts</h2>
+                  <h2 className="text-lg font-semibold text-slate-900">Top performing Partnership</h2>
                   <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700">
                     Revenue focus
                   </span>
@@ -1043,11 +1043,12 @@ export default function BusinessVisualizationPage() {
                   <table className="min-w-full text-left text-sm">
                     <thead>
                       <tr className="text-slate-500">
-                        <th className="px-3 py-2 font-medium">Resort</th>
+                        <th className="px-3 py-2 font-medium">Account</th>
                         <th className="px-3 py-2 font-medium">Rides</th>
                         <th className="px-3 py-2 font-medium">1 Hour Packages</th>
                         <th className="px-3 py-2 font-medium">3 Hour Packages</th>
                         <th className="px-3 py-2 font-medium">12 Hour Packages</th>
+                        <th className="px-3 py-2 font-medium">1 Day Packages</th>
                         <th className="px-3 py-2 font-medium">Minutes</th>
                         <th className="px-3 py-2 font-medium">Revenue</th>
                       </tr>
@@ -1074,6 +1075,9 @@ export default function BusinessVisualizationPage() {
                             </td>
                             <td className="px-3 py-2 text-slate-700">
                               {formatNumber.format(packageCounts["12h"] ?? 0)}
+                            </td>
+                             <td className="px-3 py-2 text-slate-700">
+                              {formatNumber.format(packageCounts["1d"] ?? 0)}
                             </td>
                             <td className="px-3 py-2 text-slate-700">{formatNumber.format(row.minutes)}</td>
                             <td className="px-3 py-2 text-emerald-600">{formatIDR.format(row.revenue)}</td>

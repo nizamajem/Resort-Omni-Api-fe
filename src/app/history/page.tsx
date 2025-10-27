@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { utils, writeFileXLSX } from "xlsx";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import { api } from "@/app/lib/api";
 import { useAuth } from "@/app/auth.context";
 
@@ -32,6 +35,20 @@ type RentalRow = {
   amountDue?: number;
 };
 
+type AccountRole = "resort" | "partnership";
+type AccountType = AccountRole | "gridwiz";
+type AccountTypeFilter = "all" | AccountType;
+type ResortDirectoryEntry = { resortName?: string; role?: string };
+
+const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
+  gridwiz: "Gridwiz",
+  resort: "Resort",
+  partnership: "Partnership",
+};
+
+const SERVICE_TAX_RATE = 0.10;
+const PPH_TAX_RATE = 0.11;
+
 export default function HistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,8 +78,13 @@ export default function HistoryPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ rentalId: string; historyId?: string; label: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [accountRoleMap, setAccountRoleMap] = useState<Record<string, AccountRole>>({});
+  const [accountTypeFilter, setAccountTypeFilter] = useState<AccountTypeFilter>("all");
+  const [gridwizShare, setGridwizShare] = useState<number>(70);
+  const [resortShare, setResortShare] = useState<number>(30);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
-  const columnCount = isSuperAdmin ? 10 : 9;
+  const columnCount = isSuperAdmin ? 11 : 10;
 
   const API_BASE = useMemo(() => {
     const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
@@ -70,10 +92,71 @@ export default function HistoryPage() {
     return "http://localhost:4000/api";
   }, []);
 
+  const loadAccountDirectory = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    try {
+      const response = await api.get("/resorts", { params: { status: "all" } });
+      const payload = response?.data;
+      const rawList = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+      const next: Record<string, AccountRole> = {};
+      (rawList as ResortDirectoryEntry[]).forEach((item) => {
+        const name = typeof item?.resortName === "string" ? item.resortName : null;
+        if (!name) return;
+        next[name] = item?.role === "partnership" ? "partnership" : "resort";
+      });
+      setAccountRoleMap(next);
+    } catch {
+      // silently ignore; UI will fall back to showing all records
+    }
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    loadAccountDirectory();
+  }, [loadAccountDirectory]);
+
+  const resolveAccountType = useCallback(
+    (resortName?: string | null): AccountType => {
+      const normalized = (resortName || "").trim();
+      const lower = normalized.toLowerCase();
+      if (
+        !normalized ||
+        normalized === "-" ||
+        lower === "gridwiz" ||
+        lower.includes("gridwiz") ||
+        lower.includes("super admin") ||
+        lower === "unknown resort"
+      ) {
+        return "gridwiz";
+      }
+      const mapped = accountRoleMap[normalized];
+      if (mapped === "partnership") return "partnership";
+      if (mapped === "resort") return "resort";
+      if (!isSuperAdmin) {
+        if (role === "partnership") return "partnership";
+        if (role === "resort") return "resort";
+      }
+      return "resort";
+    },
+    [accountRoleMap, isSuperAdmin, role]
+  );
+
   const fmtIDR = (n: number) =>
     new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n || 0);
   const fmtDate = (iso?: string | number) =>
     iso ? new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "-";
+  const invoiceCurrencyFormatter = useMemo(
+    () => new Intl.NumberFormat("en-US", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }),
+    []
+  );
+  const fmtInvoiceCurrency = useCallback(
+    (value: number) => invoiceCurrencyFormatter.format(Math.round(value || 0)),
+    [invoiceCurrencyFormatter]
+  );
+  const fmtInvoiceDate = useCallback(
+    (iso?: string | number) =>
+      iso ? new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "-",
+    []
+  );
 
   const load = async () => {
     setLoading(true);
@@ -189,12 +272,36 @@ export default function HistoryPage() {
       });
     return ended.map((r) => {
       const historyRow = findHistoryForRental(r);
+      const rawResortName =
+        typeof r.resortName === "string" && r.resortName.trim().length > 0
+          ? r.resortName
+          : historyRow?.resortName;
+      const normalizedResort = typeof rawResortName === "string" ? rawResortName.trim() : "";
+      const isUnknown =
+        !normalizedResort ||
+        normalizedResort === "-" ||
+        normalizedResort.toLowerCase() === "unknown resort";
+      const displayResort = isUnknown ? "Super Admin" : rawResortName || "Super Admin";
+      const accountType = resolveAccountType(rawResortName);
       const start = r.startedAt;
       const end = typeof r.endedAt === 'number' && r.endedAt > 0 ? r.endedAt : start;
       const durSec = Math.max(0, Math.floor((end - start) / 1000));
+      const durMin = Math.max(0, Math.ceil((end - start) / 60000));
       const hh = String(Math.floor(durSec / 3600)).padStart(2, '0');
       const mm2 = String(Math.floor((durSec % 3600) / 60)).padStart(2, '0');
       const ss2 = String(durSec % 60).padStart(2, '0');
+      const baseMinutes = typeof r.baseMinutes === 'number' ? r.baseMinutes : Number(r.baseMinutes ?? 0);
+      const extraMin = Math.max(0, durMin - (baseMinutes || 0));
+      const extraBlocks = Math.max(0, Math.ceil(extraMin / 30));
+      const extrasCost = extraBlocks * 30000;
+      const amountCandidateRaw = (r as any).amountDue;
+      const amountCandidate = typeof amountCandidateRaw === 'number' ? amountCandidateRaw : Number(amountCandidateRaw ?? NaN);
+      const basePrice = typeof r.basePrice === 'number' ? r.basePrice : Number(r.basePrice ?? 0);
+      const fallbackAmount = basePrice + extrasCost;
+      const totalAmount = Number.isFinite(amountCandidate) && amountCandidate > 0 ? amountCandidate : fallbackAmount;
+      const serviceTaxAmount = totalAmount * SERVICE_TAX_RATE;
+      const pphAmount = totalAmount * PPH_TAX_RATE;
+      const netAmount = totalAmount - serviceTaxAmount - pphAmount;
       return ({
         _type: 'Rental' as const,
         key: `r-${r.id}`,
@@ -208,24 +315,59 @@ export default function HistoryPage() {
         status: r.status,
         historyId: historyRow?.id,
         raw: r,
+        accountType,
+        displayResort,
+        totalAmount,
+        serviceTaxAmount,
+        pphAmount,
+        netAmount,
       });
     });
-  }, [rentals, rows]);
+  }, [rentals, rows, resolveAccountType]);
+
+  const accountCounts = useMemo(() => {
+    const counts: Record<AccountType, number> = {
+      gridwiz: 0,
+      resort: 0,
+      partnership: 0,
+    };
+    unified.forEach((u: any) => {
+      const type = u.accountType as AccountType | undefined;
+      if (type && type in counts) {
+        counts[type] += 1;
+      }
+    });
+    return counts;
+  }, [unified]);
+
+  const accountTypeOptions = useMemo(() => {
+    const totalAccounts = accountCounts.gridwiz + accountCounts.resort + accountCounts.partnership;
+    return [
+      { id: "all" as AccountTypeFilter, label: "All Accounts", count: totalAccounts },
+      { id: "resort" as AccountTypeFilter, label: "Resort", count: accountCounts.resort },
+      { id: "partnership" as AccountTypeFilter, label: "Partnership", count: accountCounts.partnership },
+    ];
+  }, [accountCounts]);
 
   const filteredUnified = useMemo(() => {
     const text = q.toLowerCase();
     const fromTs = from ? Date.parse(from) : undefined;
     const toTs = to ? Date.parse(to) + 24*60*60*1000 - 1 : undefined; // inclusive day
     return unified.filter((u) => {
+      if (accountTypeFilter !== "all" && u.accountType !== accountTypeFilter) {
+        return false;
+      }
       // search across guest, room, package, resort, payment fields
       const hay = [
         u.guest,
         u.pkg,
         (u as any).raw?.roomNumber,
+        u.displayResort,
         (u as any).raw?.resortName,
         (u as any).methodDirect,
         (u as any).methodOrderId,
         u.status,
+        u.accountType,
       ]
         .map((v) => (v ?? "").toString().toLowerCase())
         .join(" ");
@@ -235,7 +377,35 @@ export default function HistoryPage() {
       if (toTs && (start ?? 0) > toTs) return false;
       return true;
     });
-  }, [unified, q, from, to]);
+  }, [unified, q, from, to, accountTypeFilter]);
+
+  const financialSummary = useMemo(() => {
+    return filteredUnified.reduce(
+      (acc, entry: any) => {
+        const gross = Number(entry?.totalAmount ?? 0) || 0;
+        const service = Number(entry?.serviceTaxAmount ?? gross * SERVICE_TAX_RATE) || 0;
+        const pph = Number(entry?.pphAmount ?? gross * PPH_TAX_RATE) || 0;
+        const net = Number(entry?.netAmount ?? gross - service - pph) || 0;
+        acc.gross += gross;
+        acc.serviceTax += service;
+        acc.pphTax += pph;
+        acc.net += net;
+        return acc;
+      },
+      { gross: 0, serviceTax: 0, pphTax: 0, net: 0 }
+    );
+  }, [filteredUnified]);
+
+  const shareTotal = gridwizShare + resortShare;
+  const shareBalanced = Math.abs(shareTotal - 100) < 0.001;
+  const gridwizShareAmount = useMemo(
+    () => financialSummary.net * (gridwizShare / 100),
+    [financialSummary.net, gridwizShare]
+  );
+  const resortShareAmount = useMemo(
+    () => financialSummary.net * (resortShare / 100),
+    [financialSummary.net, resortShare]
+  );
 
   const total = filteredUnified.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -245,31 +415,262 @@ export default function HistoryPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [q, statusFilter, methodFilter, from, to]);
+  }, [q, statusFilter, methodFilter, from, to, accountTypeFilter]);
 
-  const downloadCSV = () => {
-    const header = [
-      'Resort','Guest','Room','Package','Start','End','Duration','Status','Payment'
+  const buildInvoiceData = () => {
+    const generatedAt = new Date();
+    const periodLabel =
+      from || to ? `${from || "all time"} to ${to || "all time"}` : "All transactions";
+    const currency = (value: number) => fmtIDR(Math.round(value || 0));
+    const detailHeader = [
+      "No",
+      "Date",
+      "Resort",
+      "Guest",
+      "Package",
+      "Duration",
+      "Total (Gross)",
+      "Service Tax 10%",
+      "Income Tax 11%",
+      "Net",
+      "Method",
+      "Status",
     ];
-    const lines = unified.map((u: any) => [
-      u.raw?.resortName || '-',
-      u.guest || '-',
-      u.raw?.roomNumber || '-',
-      u.pkg || '-',
-      typeof u.start === 'number' || typeof u.start === 'string' ? fmtDate(u.start) : '-',
-      typeof u.end === 'number' || typeof u.end === 'string' ? fmtDate(u.end) : '-',
-      u.dur || '-',
-      u.status || '-',
-      (u.methodDirect ? String(u.methodDirect).replace(/_/g,' ').toUpperCase() : (u.methodOrderId ? (methodMap[u.methodOrderId] ? String(methodMap[u.methodOrderId]).replace(/_/g,' ').toUpperCase() : '-') : '-')),
-    ]);
-    const csv = [header, ...lines].map((a) => a.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `history-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const detailRows = filteredUnified.map((u: any, index: number) => {
+      const paymentLabel = u.methodDirect
+        ? String(u.methodDirect).replace(/_/g, " ").toUpperCase()
+        : u.methodOrderId
+        ? methodMap[u.methodOrderId]
+          ? String(methodMap[u.methodOrderId]).replace(/_/g, " ").toUpperCase()
+          : "-"
+        : "-";
+      return [
+        index + 1,
+        fmtDate(u.end ?? u.start),
+        u.displayResort || "-",
+        u.guest || "-",
+        u.pkg || "-",
+        u.dur || "-",
+        currency(u.totalAmount || 0),
+        currency(u.serviceTaxAmount || 0),
+        currency(u.pphAmount || 0),
+        currency(u.netAmount || 0),
+        paymentLabel,
+        u.status || "-",
+      ];
+    });
+    const totalsRow = [
+      "Total",
+      "",
+      "",
+      "",
+      "",
+      "",
+      currency(financialSummary.gross),
+      currency(financialSummary.serviceTax),
+      currency(financialSummary.pphTax),
+      currency(financialSummary.net),
+      "",
+      "",
+    ];
+    return { generatedAt, periodLabel, currency, detailHeader, detailRows, totalsRow };
+  };
+
+  const exportInvoice = () => {
+    if (!filteredUnified.length) {
+      return false;
+    }
+    const { generatedAt, periodLabel, currency, detailHeader, detailRows, totalsRow } = buildInvoiceData();
+    const sheetData = [
+      ["PAYMENT INVOICE"],
+      [
+        "Generated At",
+        generatedAt.toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" }),
+      ],
+      ["Period", periodLabel],
+      ["Total Transactions", filteredUnified.length],
+      [],
+      ["Revenue Summary"],
+      ["Total Gross", currency(financialSummary.gross)],
+      ["Service Tax (10%)", currency(financialSummary.serviceTax)],
+      ["Income Tax (11%)", currency(financialSummary.pphTax)],
+      ["Net Total", currency(financialSummary.net)],
+      [],
+      ["Revenue Split"],
+      [`Gridwiz (${gridwizShare}%)`, currency(gridwizShareAmount)],
+      [`Resort (${resortShare}%)`, currency(resortShareAmount)],
+      [
+        "Total Percentage",
+        `${shareTotal.toFixed(2)}%${shareBalanced ? "" : " (please review)"}`,
+      ],
+      [],
+      ["Transaction Details"],
+      detailHeader,
+      ...detailRows,
+      totalsRow,
+    ];
+    const worksheet = utils.aoa_to_sheet(sheetData);
+    worksheet["!cols"] = [
+      { wch: 6 },
+      { wch: 20 },
+      { wch: 25 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 15 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 12 },
+    ];
+    const workbook = utils.book_new();
+    utils.book_append_sheet(workbook, worksheet, "Invoice");
+    writeFileXLSX(workbook, `history-invoice-${generatedAt.toISOString().slice(0, 10)}.xlsx`);
+    return true;
+  };
+
+  const exportInvoicePDF = () => {
+    if (!filteredUnified.length) {
+      return false;
+    }
+    const { generatedAt, periodLabel, currency, detailHeader, detailRows, totalsRow } = buildInvoiceData();
+    const pdfDetailHeader = detailHeader.slice(0, -2);
+    const pdfDetailRows = detailRows.map((row) => row.slice(0, -2));
+    const pdfTotalsRow = totalsRow.slice(0, -2);
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const marginX = 40;
+    const headerTop = 36;
+
+    // Header layout inspired by provided template
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.6);
+    doc.line(marginX, headerTop + 36, pageWidth - marginX, headerTop + 36);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(108, 168, 120);
+    doc.text("Gridwiz", marginX, headerTop + 4);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(122, 180, 136);
+    doc.text("ENERGY & MOBILITY", marginX, headerTop + 18);
+
+    doc.setTextColor(96, 97, 99);
+    doc.setFont("times", "bold");
+    doc.setFontSize(16);
+    doc.text("PT GRIDWIZ ENERGY & MOBILITY", pageWidth - marginX, headerTop + 6, {
+      align: "right",
+    });
+
+    doc.setFont("times", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(130, 130, 130);
+    doc.text("Jl. Majapahit No. 62 Mataram 83125", pageWidth - marginX, headerTop + 20, {
+      align: "right",
+    });
+    doc.text("Website: www.gridwizenm.com  Tel: (+62) 895357986000", pageWidth - marginX, headerTop + 32, {
+      align: "right",
+    });
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    const metaStartY = headerTop + 70;
+
+    doc.text("PAYMENT INVOICE", pageWidth / 2, metaStartY, { align: "center" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.text(
+      `Generated At : ${generatedAt.toLocaleString("en-US", {
+        dateStyle: "full",
+        timeStyle: "short",
+      })}`,
+      marginX,
+      metaStartY + 28
+    );
+    doc.text(`Period : ${periodLabel}`, marginX, metaStartY + 48);
+    doc.text(`Total Transactions : ${filteredUnified.length}`, marginX, metaStartY + 68);
+
+    autoTable(doc, {
+      startY: metaStartY + 88,
+      head: [["Summary", "Amount"]],
+      body: [
+        ["Total Gross", currency(financialSummary.gross)],
+        ["Service Tax (10%)", currency(financialSummary.serviceTax)],
+        ["Income Tax (11%)", currency(financialSummary.pphTax)],
+        ["Net Total", currency(financialSummary.net)],
+      ],
+      theme: "grid",
+      styles: { fontSize: 10, cellPadding: 6 },
+      headStyles: { fillColor: [14, 116, 144], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 249, 252] },
+    });
+
+    const summaryEndY = (doc as any).lastAutoTable?.finalY ?? metaStartY + 88;
+
+    autoTable(doc, {
+      startY: summaryEndY + 16,
+      head: [["Allocation", "Amount"]],
+      body: [
+        [`Gridwiz (${gridwizShare}%)`, currency(gridwizShareAmount)],
+        [`Resort (${resortShare}%)`, currency(resortShareAmount)],
+        ["Total Percentage", `${shareTotal.toFixed(2)}%`],
+      ],
+      theme: "grid",
+      styles: { fontSize: 10, cellPadding: 6 },
+      headStyles: { fillColor: [14, 116, 144], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 249, 252] },
+    });
+
+    const allocationEndY = (doc as any).lastAutoTable?.finalY ?? summaryEndY + 16;
+
+    autoTable(doc, {
+      startY: allocationEndY + 24,
+      head: [pdfDetailHeader],
+      body: [...pdfDetailRows, pdfTotalsRow],
+      theme: "striped",
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [14, 116, 144], textColor: 255 },
+      alternateRowStyles: { fillColor: [249, 251, 255] },
+      didDrawPage: (data) => {
+        const footerY = doc.internal.pageSize.getHeight() - 20;
+        doc.setFontSize(9);
+        doc.setTextColor(150);
+        doc.text(
+          `Page ${data.pageNumber}`,
+          pageWidth - 60,
+          footerY,
+          { align: "right" }
+        );
+      },
+    });
+
+    doc.save(`history-invoice-${generatedAt.toISOString().slice(0, 10)}.pdf`);
+    return true;
+  };
+
+  const canDownloadInvoice = shareBalanced && filteredUnified.length > 0;
+
+  const handleDownloadExcel = () => {
+    if (!canDownloadInvoice) return;
+    const ok = exportInvoice();
+    if (ok) {
+      setNotice("Invoice Excel downloaded successfully.");
+      setExportModalOpen(false);
+    }
+  };
+
+  const handleDownloadPDF = () => {
+    if (!canDownloadInvoice) return;
+    const ok = exportInvoicePDF();
+    if (ok) {
+      setNotice("Invoice PDF downloaded successfully.");
+      setExportModalOpen(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -385,7 +786,7 @@ export default function HistoryPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3.5 3.5M12 3a9 9 0 1 0 9 9"/></svg>
@@ -395,12 +796,35 @@ export default function HistoryPage() {
               <p className="text-sm text-slate-600">Completed rental payments with full details.</p>
             </div>
           </div>
-          <button suppressHydrationWarning onClick={downloadCSV} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Export CSV</button>
+          <div className="w-full max-w-sm space-y-2 text-sm text-slate-600">
+            <div className="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span>Total transactions</span>
+                <span className="font-semibold text-slate-900">{filteredUnified.length}</span>
+              </div>
+              <div className="mt-1 flex items-center justify-between">
+                <span>Net after tax</span>
+                <span className="font-semibold text-slate-900">{fmtIDR(financialSummary.net)}</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              Full summary and revenue split controls are available when you export the invoice.
+            </p>
+            <button
+              suppressHydrationWarning
+              onClick={() => { setNotice(null); setExportModalOpen(true); }}
+              className="w-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 shadow-sm transition hover:bg-sky-100"
+            >
+              Export Invoice (Excel or PDF)
+            </button>
+          </div>
         </div>
       </section>
 
       <section className="rounded-2xl bg-white/90 p-5 ring-1 ring-slate-200 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div
+          className={`grid gap-3 ${isSuperAdmin ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}
+        >
           <input suppressHydrationWarning
             type="search"
             placeholder="Search guest/email, room, package"
@@ -409,15 +833,51 @@ export default function HistoryPage() {
             className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
           />
           {/* Method filter removed in favor of Midtrans types shown per row */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:col-span-2">
             <input suppressHydrationWarning type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
             <input suppressHydrationWarning type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100" />
           </div>
+          {isSuperAdmin && (
+            <div className="flex flex-col">
+              <label
+                htmlFor="history-account-type"
+                className="text-xs font-medium uppercase tracking-wide text-slate-500"
+              >
+                Account Type
+              </label>
+              <select
+                id="history-account-type"
+                value={accountTypeFilter}
+                onChange={(event) => setAccountTypeFilter(event.target.value as AccountTypeFilter)}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+              >
+                {accountTypeOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div className="mt-4 flex items-center gap-2">
           <button suppressHydrationWarning onClick={load} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Apply</button>
-          {(q || from || to || statusFilter !== "all" || methodFilter !== "all") && (
-            <button suppressHydrationWarning onClick={() => { setQ(""); setFrom(""); setTo(""); setStatusFilter("all"); setMethodFilter("all"); load(); }} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition hover:bg-slate-50">Reset</button>
+          {(q || from || to || statusFilter !== "all" || methodFilter !== "all" || accountTypeFilter !== "all") && (
+            <button
+              suppressHydrationWarning
+              onClick={() => {
+                setQ("");
+                setFrom("");
+                setTo("");
+                setStatusFilter("all");
+                setMethodFilter("all");
+                setAccountTypeFilter("all");
+                load();
+              }}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition hover:bg-slate-50"
+            >
+              Reset
+            </button>
           )}
           {/* <button suppressHydrationWarning onClick={() => setDebugOpen((x) => !x)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">{debugOpen ? 'Hide Debug' : 'Show Debug'}</button> */}
         </div>
@@ -426,9 +886,10 @@ export default function HistoryPage() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
-                <th className="px-4 py-3 font-medium">Resort</th>
+                <th className="px-4 py-3 font-medium">Account</th>
+                <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Guest</th>
-                <th className="px-4 py-3 font-medium">Room</th>
+                <th className="px-4 py-3 font-medium">Room / Phone Number</th>
                 <th className="px-4 py-3 font-medium">Package</th>
                 <th className="px-4 py-3 font-medium">Start</th>
                 <th className="px-4 py-3 font-medium">End</th>
@@ -444,42 +905,63 @@ export default function HistoryPage() {
               ) : filteredUnified.length === 0 ? (
                 <tr><td colSpan={columnCount} className="px-4 py-6 text-center text-slate-500">No data.</td></tr>
               ) : (
-                filteredUnified.slice(start, end).map((u: any) => (
-                  <tr key={u.key} className="border-t border-slate-100">
-                    <td className="px-4 py-3 text-slate-800">{u.raw?.resortName || '-'}</td>
-                    <td className="px-4 py-3 text-slate-800">{u.guest}</td>
-                    <td className="px-4 py-3 text-slate-800">{u.raw?.roomNumber || '-'}</td>
-                    <td className="px-4 py-3 text-slate-800">{u.pkg}</td>
-                    <td className="px-4 py-3 text-slate-700"><span suppressHydrationWarning>{fmtDate(u.start)}</span></td>
-                    <td className="px-4 py-3 text-slate-700"><span suppressHydrationWarning>{fmtDate(u.end)}</span></td>
-                    <td className="px-4 py-3"><RentalStatusPill s={u.status as any} /></td>
-                    <td className="px-4 py-3"><PaymentPill orderId={u.methodOrderId} direct={u.methodDirect} /></td>
-                    <td className="px-4 py-3"><button onClick={() => openDetail(u.raw)} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50">Details</button></td>
-                    {isSuperAdmin && (
-                      <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          disabled={deleteBusy}
-                          onClick={() => {
-                            if (!u?.raw?.id) return;
-                            setNotice(null);
-                            setError(null);
-                            setDeleteTarget({
-                              rentalId: u.raw.id,
-                              historyId: u.historyId,
-                              label: `${u.guest || 'Guest'} - ${fmtDate(u.end || u.start)}`
-                            });
-                          }}
-                          aria-label="Delete history"
-                          title="Delete history"
-                          className="rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m1 0v11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V7m3 4v6m4-6v6"/></svg>
-                        </button>
+                filteredUnified.slice(start, end).map((u: any) => {
+                  const accountType: AccountType = u.accountType || "resort";
+                  const typeLabel = ACCOUNT_TYPE_LABELS[accountType] || "Resort";
+                  const typeBadgeClass =
+                    accountType === "gridwiz"
+                      ? "bg-amber-100 text-amber-700"
+                      : accountType === "partnership"
+                      ? "bg-violet-100 text-violet-700"
+                      : "bg-sky-100 text-sky-700";
+                  const resortLabel =
+                    typeof u.displayResort === "string" && u.displayResort
+                      ? u.displayResort
+                      : typeof u.raw?.resortName === "string" && u.raw.resortName
+                      ? u.raw.resortName
+                      : "-";
+                  return (
+                    <tr key={u.key} className="border-t border-slate-100">
+                      <td className="px-4 py-3 text-slate-800">{resortLabel}</td>
+                      <td className="px-4 py-3 text-slate-800">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}>
+                          {typeLabel}
+                        </span>
                       </td>
-                    )}
-                  </tr>
-                ))
+                      <td className="px-4 py-3 text-slate-800">{u.guest}</td>
+                      <td className="px-4 py-3 text-slate-800">{u.raw?.roomNumber || '-'}</td>
+                      <td className="px-4 py-3 text-slate-800">{u.pkg}</td>
+                      <td className="px-4 py-3 text-slate-700"><span suppressHydrationWarning>{fmtDate(u.start)}</span></td>
+                      <td className="px-4 py-3 text-slate-700"><span suppressHydrationWarning>{fmtDate(u.end)}</span></td>
+                      <td className="px-4 py-3"><RentalStatusPill s={u.status as any} /></td>
+                      <td className="px-4 py-3"><PaymentPill orderId={u.methodOrderId} direct={u.methodDirect} /></td>
+                      <td className="px-4 py-3"><button onClick={() => openDetail(u.raw)} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50">Details</button></td>
+                      {isSuperAdmin && (
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            disabled={deleteBusy}
+                            onClick={() => {
+                              if (!u?.raw?.id) return;
+                              setNotice(null);
+                              setError(null);
+                              setDeleteTarget({
+                                rentalId: u.raw.id,
+                                historyId: u.historyId,
+                                label: `${u.guest || 'Guest'} - ${fmtDate(u.end || u.start)}`
+                              });
+                            }}
+                            aria-label="Delete history"
+                            title="Delete history"
+                            className="rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m1 0v11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V7m3 4v6m4-6v6"/></svg>
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -588,6 +1070,157 @@ export default function HistoryPage() {
         {notice && <div className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700 ring-1 ring-emerald-200">{notice}</div>}
         {error && <div className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">{error}</div>}
       </section>
+
+      {exportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setExportModalOpen(false)}
+          />
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Invoice Summary</h3>
+                <p className="text-sm text-slate-600">
+                  Review the payment summary and adjust the revenue split before exporting.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExportModalOpen(false)}
+                className="rounded-full border border-slate-200 bg-white p-1 text-slate-600 transition hover:border-slate-300 hover:text-slate-800"
+                aria-label="Close"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-700 shadow-inner">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Period</span>
+                    <span className="font-medium text-slate-900">
+                      {from || to ? `${from || "start"} → ${to || "now"}` : "All transactions"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total transactions</span>
+                    <span className="font-medium text-slate-900">{filteredUnified.length}</span>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="flex items-center justify-between rounded-xl bg-white/80 px-3 py-2 text-sm shadow-sm ring-1 ring-slate-200">
+                    <span>Total Gross</span>
+                    <span className="font-semibold text-slate-900">{fmtIDR(financialSummary.gross)}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl bg-white/80 px-3 py-2 text-sm shadow-sm ring-1 ring-slate-200">
+                    <span>Net after tax</span>
+                    <span className="font-semibold text-slate-900">{fmtIDR(financialSummary.net)}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl bg-white/80 px-3 py-2 text-sm shadow-sm ring-1 ring-slate-200">
+                    <span>Service Tax (10%)</span>
+                    <span className="font-semibold text-slate-900">{fmtIDR(financialSummary.serviceTax)}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl bg-white/80 px-3 py-2 text-sm shadow-sm ring-1 ring-slate-200">
+                    <span>Income Tax (11%)</span>
+                    <span className="font-semibold text-slate-900">{fmtIDR(financialSummary.pphTax)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Gridwiz (%)
+                  <input
+                    suppressHydrationWarning
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={gridwizShare}
+                    onChange={(event) => {
+                      const parsed = Number.parseFloat(event.target.value);
+                      setGridwizShare(Number.isNaN(parsed) ? 0 : Math.min(100, Math.max(0, parsed)));
+                    }}
+                    className="mt-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                  />
+                </label>
+                <label className="flex flex-col text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Resort (%)
+                  <input
+                    suppressHydrationWarning
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={resortShare}
+                    onChange={(event) => {
+                      const parsed = Number.parseFloat(event.target.value);
+                      setResortShare(Number.isNaN(parsed) ? 0 : Math.min(100, Math.max(0, parsed)));
+                    }}
+                    className="mt-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                  />
+                </label>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white/80 p-4 text-sm text-slate-700 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estimated Split</div>
+                <div className="mt-3 space-y-1.5">
+                  <div className="flex items-center justify-between"><span>Gridwiz</span><span className="font-semibold text-slate-900">{fmtIDR(gridwizShareAmount)}</span></div>
+                  <div className="flex items-center justify-between"><span>Resort</span><span className="font-semibold text-slate-900">{fmtIDR(resortShareAmount)}</span></div>
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>Total percentage</span>
+                    <span className="font-semibold text-slate-700">{shareTotal.toFixed(2)}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {!shareBalanced && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  Gridwiz and resort percentages must total 100% before exporting the invoice.
+                </div>
+              )}
+
+              {filteredUnified.length === 0 && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  No data matches the current filters. Adjust the filters before exporting the invoice.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setExportModalOpen(false)}
+                className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleDownloadExcel}
+                  disabled={!canDownloadInvoice}
+                  className="h-11 flex-1 rounded-xl border border-sky-200 bg-sky-50 px-5 text-sm font-medium text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-500"
+                >
+                  Download Excel (.xlsx)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadPDF}
+                  disabled={!canDownloadInvoice}
+                  className="h-11 flex-1 rounded-xl bg-sky-600 px-5 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  Download PDF (.pdf)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

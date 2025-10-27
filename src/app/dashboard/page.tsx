@@ -111,6 +111,14 @@ export default function DashboardPage() {
   const [guestInfoOpen, setGuestInfoOpen] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [roomNumber, setRoomNumber] = useState("");
+  const isPartnershipRole = effectiveRole === 'partnership';
+  const guestSecondaryLabel = isPartnershipRole ? 'Phone Number' : 'Room Number';
+  const guestSecondaryPlaceholder = isPartnershipRole ? 'e.g. 081234567890' : 'e.g. 203';
+  const guestSecondaryPrompt = isPartnershipRole
+    ? 'Please input guest name and phone number for this order.'
+    : 'Please input guest name and room number for this order.';
+  const guestSecondarySummaryLabel = isPartnershipRole ? 'Phone' : 'Room';
+  const guestSecondaryDataName = isPartnershipRole ? 'phone number' : 'room number';
   // initial payment modals removed; payment only on Pay Now
   const [confirmCashOpen, setConfirmCashOpen] = useState(false);
   const [agreeChecked, setAgreeChecked] = useState(false);
@@ -637,15 +645,22 @@ export default function DashboardPage() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setGuestInfoOpen(false)} />
           <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">Guest Information</h3>
-            <p className="mt-1 text-sm text-slate-600">Please input guest name and room number for this order.</p>
+            <p className="mt-1 text-sm text-slate-600">{guestSecondaryPrompt}</p>
             <div className="mt-4 space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name</label>
                 <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="e.g. John Doe" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200 focus:border-sky-500 focus:ring-sky-100" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Room Number</label>
-                <input value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 203" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200 focus:border-sky-500 focus:ring-sky-100" />
+                <label className="mb-1 block text-xs font-medium text-slate-600">{guestSecondaryLabel}</label>
+                <input
+                  value={roomNumber}
+                  onChange={(e) => setRoomNumber(e.target.value)}
+                  placeholder={guestSecondaryPlaceholder}
+                  type={isPartnershipRole ? 'tel' : 'text'}
+                  inputMode={isPartnershipRole ? 'tel' : undefined}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200 focus:border-sky-500 focus:ring-sky-100"
+                />
               </div>
             </div>
             <div className="mt-5 flex gap-3">
@@ -664,7 +679,7 @@ export default function DashboardPage() {
             <h3 className="text-lg font-semibold text-slate-900">Start Rental</h3>
             <p className="mt-2 text-sm text-slate-600">Please confirm to start rental for {orderFor.title} ({fmt(orderFor.price)}).</p>
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-slate-200">
-              Guest: <span className="font-medium text-slate-900">{guestName || "-"}</span> Room: <span className="font-medium text-slate-900">{roomNumber || "-"}</span>
+              Guest: <span className="font-medium text-slate-900">{guestName || "-"}</span> {guestSecondarySummaryLabel}: <span className="font-medium text-slate-900">{roomNumber || "-"}</span>
             </div>
             <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
               <input type="checkbox" checked={agreeChecked} onChange={(e) => setAgreeChecked(e.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" />
@@ -690,7 +705,7 @@ export default function DashboardPage() {
             <h3 className="text-lg font-semibold text-slate-900">{openPrivacy ? 'Privacy Policy' : 'User Agreement'}</h3>
             <div className="mt-3 space-y-3 text-sm leading-relaxed text-slate-700">
               <p>Thank you for using the Re:Flow service. This document explains {openPrivacy ? 'how we collect, use, and protect your personal data.' : 'the terms and conditions for using our service, including your responsibilities while renting and operating the devices.'}</p>
-              <p>Key reminder: the data you submit (guest name and room number) is used for identification, billing, and the resort's operational records.</p>
+              <p>Key reminder: the data you submit (guest name and {guestSecondaryDataName}) is used for identification, billing, and the resort's operational records.</p>
               <p>For the complete document, please contact the administrator or visit our official legal page.</p>
             </div>
             <div className="mt-5 flex justify-end">
@@ -719,7 +734,7 @@ export default function DashboardPage() {
               <tr>
                 <th className="px-3 py-2 font-medium">Resort</th>
                 <th className="px-3 py-2 font-medium">Guest</th>
-                <th className="px-3 py-2 font-medium">Room</th>
+                <th className="px-3 py-2 font-medium">{guestSecondarySummaryLabel}</th>
                 <th className="px-3 py-2 font-medium">Email</th>
                 <th className="px-3 py-2 font-medium">Package</th>
                 <th className="px-3 py-2 font-medium">Start</th>
@@ -815,7 +830,7 @@ export default function DashboardPage() {
             <p className="mt-2 text-sm text-slate-600">Are you sure you want to end this rental now?</p>
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200">
               <div className="flex items-center justify-between"><span className="text-slate-600">Guest</span><span className="font-medium text-slate-900">{endTarget.guestName}</span></div>
-              <div className="mt-1 flex items-center justify-between"><span className="text-slate-600">Room</span><span className="font-medium text-slate-900">{endTarget.roomNumber}</span></div>
+              <div className="mt-1 flex items-center justify-between"><span className="text-slate-600">{guestSecondarySummaryLabel}</span><span className="font-medium text-slate-900">{endTarget.roomNumber}</span></div>
               <div className="mt-1 flex items-center justify-between"><span className="text-slate-600">Package</span><span className="font-medium text-slate-900">{endTarget.packageName}</span></div>
             </div>
             <div className="mt-5 flex gap-3">
@@ -883,7 +898,7 @@ export default function DashboardPage() {
                       <span className="font-medium text-slate-900">{payTarget.guestName}</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-600">Room</span>
+                      <span className="text-slate-600">{guestSecondarySummaryLabel}</span>
                       <span className="font-medium text-slate-900">{payTarget.roomNumber}</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
