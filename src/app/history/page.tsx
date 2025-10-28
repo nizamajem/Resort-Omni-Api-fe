@@ -84,6 +84,26 @@ export default function HistoryPage() {
   const [resortShare, setResortShare] = useState<number>(30);
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
+  const requireSuperAdmin = useCallback(() => {
+    if (isSuperAdmin) {
+      return true;
+    }
+    setNotice('Only super admins can export invoices.');
+    return false;
+  }, [isSuperAdmin]);
+
+  const openExportModal = useCallback(() => {
+    if (!requireSuperAdmin()) {
+      return;
+    }
+    setNotice(null);
+    setExportModalOpen(true);
+  }, [requireSuperAdmin]);
+
+  const closeExportModal = useCallback(() => {
+    setExportModalOpen(false);
+  }, []);
+
   const columnCount = isSuperAdmin ? 11 : 10;
 
   const API_BASE = useMemo(() => {
@@ -291,14 +311,24 @@ export default function HistoryPage() {
       const mm2 = String(Math.floor((durSec % 3600) / 60)).padStart(2, '0');
       const ss2 = String(durSec % 60).padStart(2, '0');
       const baseMinutes = typeof r.baseMinutes === 'number' ? r.baseMinutes : Number(r.baseMinutes ?? 0);
-      const extraMin = Math.max(0, durMin - (baseMinutes || 0));
-      const extraBlocks = Math.max(0, Math.ceil(extraMin / 30));
-      const extrasCost = extraBlocks * 30000;
       const amountCandidateRaw = (r as any).amountDue;
       const amountCandidate = typeof amountCandidateRaw === 'number' ? amountCandidateRaw : Number(amountCandidateRaw ?? NaN);
       const basePrice = typeof r.basePrice === 'number' ? r.basePrice : Number(r.basePrice ?? 0);
-      const fallbackAmount = basePrice + extrasCost;
-      const totalAmount = Number.isFinite(amountCandidate) && amountCandidate > 0 ? amountCandidate : fallbackAmount;
+      let totalAmount = Number.isFinite(amountCandidate) && amountCandidate > 0 ? amountCandidate : basePrice;
+      if (r.billingMode === 'tiered') {
+        const blockMinutes = Math.max(1, Number((r as any).customBlockMinutes ?? baseMinutes));
+        const blockRateCandidate = Number((r as any).customBlockRate ?? basePrice);
+        const blockRate = Number.isFinite(blockRateCandidate) && blockRateCandidate > 0 ? Math.round(blockRateCandidate) : basePrice;
+        const blocksUsed = Math.max(0, Math.ceil(durMin / blockMinutes));
+        const tierTotal = blocksUsed * blockRate;
+        totalAmount = Number.isFinite(amountCandidate) && amountCandidate > 0 ? Number(amountCandidate) : tierTotal;
+      } else {
+        const extraMin = Math.max(0, durMin - (baseMinutes || 0));
+        const extraBlocks = Math.max(0, Math.ceil(extraMin / 30));
+        const extrasCost = extraBlocks * 30000;
+        const fallbackAmount = basePrice + extrasCost;
+        totalAmount = Number.isFinite(amountCandidate) && amountCandidate > 0 ? amountCandidate : fallbackAmount;
+      }
       const serviceTaxAmount = totalAmount * SERVICE_TAX_RATE;
       const pphAmount = totalAmount * PPH_TAX_RATE;
       const netAmount = totalAmount - serviceTaxAmount - pphAmount;
@@ -477,6 +507,9 @@ export default function HistoryPage() {
   };
 
   const exportInvoice = () => {
+    if (!requireSuperAdmin()) {
+      return false;
+    }
     if (!filteredUnified.length) {
       return false;
     }
@@ -531,6 +564,9 @@ export default function HistoryPage() {
   };
 
   const exportInvoicePDF = () => {
+    if (!requireSuperAdmin()) {
+      return false;
+    }
     if (!filteredUnified.length) {
       return false;
     }
@@ -660,7 +696,7 @@ export default function HistoryPage() {
     const ok = exportInvoice();
     if (ok) {
       setNotice("Invoice Excel downloaded successfully.");
-      setExportModalOpen(false);
+      closeExportModal();
     }
   };
 
@@ -669,7 +705,7 @@ export default function HistoryPage() {
     const ok = exportInvoicePDF();
     if (ok) {
       setNotice("Invoice PDF downloaded successfully.");
-      setExportModalOpen(false);
+      closeExportModal();
     }
   };
 
@@ -810,13 +846,15 @@ export default function HistoryPage() {
             <p className="text-xs text-slate-500">
               Full summary and revenue split controls are available when you export the invoice.
             </p>
-            <button
-              suppressHydrationWarning
-              onClick={() => { setNotice(null); setExportModalOpen(true); }}
-              className="w-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 shadow-sm transition hover:bg-sky-100"
-            >
-              Export Invoice (Excel or PDF)
-            </button>
+            {isSuperAdmin && (
+              <button
+                suppressHydrationWarning
+                onClick={openExportModal}
+                className="w-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 shadow-sm transition hover:bg-sky-100"
+              >
+                Export Invoice (Excel or PDF)
+              </button>
+            )}
           </div>
         </div>
       </section>
@@ -1071,11 +1109,11 @@ export default function HistoryPage() {
         {error && <div className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">{error}</div>}
       </section>
 
-      {exportModalOpen && (
+      {exportModalOpen && isSuperAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => setExportModalOpen(false)}
+            onClick={closeExportModal}
           />
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <div className="flex items-start justify-between gap-3">
@@ -1087,7 +1125,7 @@ export default function HistoryPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setExportModalOpen(false)}
+                onClick={closeExportModal}
                 className="rounded-full border border-slate-200 bg-white p-1 text-slate-600 transition hover:border-slate-300 hover:text-slate-800"
                 aria-label="Close"
               >
@@ -1194,7 +1232,7 @@ export default function HistoryPage() {
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
               <button
                 type="button"
-                onClick={() => setExportModalOpen(false)}
+                onClick={closeExportModal}
                 className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50"
               >
                 Cancel
@@ -1288,10 +1326,28 @@ export default function HistoryPage() {
               const hh = String(Math.floor(durSec/3600)).padStart(2,'0');
               const mm = String(Math.floor((durSec%3600)/60)).padStart(2,'0');
               const ss = String(durSec%60).padStart(2,'0');
-              const extraMin = Math.max(0, durMin - (r.baseMinutes || 0));
-              const blocks = Math.max(0, Math.ceil(extraMin/30));
-              const extrasCost = blocks * 30000;
-              const total = r.amountDue ?? (r.basePrice + extrasCost);
+              const isTieredRental = r.billingMode === 'tiered';
+              let total = r.amountDue ?? r.basePrice;
+              const breakdownRows: { label: string; value: string }[] = [];
+              if (isTieredRental) {
+                const blockMinutes = Math.max(1, Number(r.customBlockMinutes ?? r.baseMinutes ?? 1));
+                const blockRateCandidate = Number(r.customBlockRate ?? r.basePrice);
+                const blockRate = Number.isFinite(blockRateCandidate) && blockRateCandidate > 0 ? Math.round(blockRateCandidate) : r.basePrice;
+                const blocksUsed = Math.max(0, Math.ceil(durMin / blockMinutes));
+                const tierTotal = blocksUsed * blockRate;
+                total = r.amountDue ?? tierTotal;
+                breakdownRows.push({ label: 'Block size', value: `${blockMinutes} min` });
+                breakdownRows.push({ label: 'Block rate', value: fmtIDR(blockRate) });
+                breakdownRows.push({ label: 'Blocks used', value: `${blocksUsed}` });
+                breakdownRows.push({ label: 'Charge', value: fmtIDR(tierTotal) });
+              } else {
+                const extraMin = Math.max(0, durMin - (r.baseMinutes || 0));
+                const blocks = Math.max(0, Math.ceil(extraMin / 30));
+                const extrasCost = blocks * 30000;
+                total = r.amountDue ?? (r.basePrice + extrasCost);
+                breakdownRows.push({ label: 'Base', value: fmtIDR(r.basePrice) });
+                breakdownRows.push({ label: `Extra (${extraMin} min / ${blocks} x 30 min)`, value: fmtIDR(extrasCost) });
+              }
               const method = (r.paymentType || '').toString().replace(/_/g,' ').toUpperCase() || '-';
               const orderId = r.paymentOrderId || '-';
               return (
@@ -1310,9 +1366,9 @@ export default function HistoryPage() {
                       <div className="flex items-center justify-between"><span className="text-slate-600">Payment type</span><span className="font-medium text-slate-900">{method}</span></div>
                       <div className="flex items-center justify-between"><span className="text-slate-600">Order ID</span><span className="font-mono text-slate-900">{orderId}</span></div>
                       <div className="my-2 h-px bg-slate-200" />
-                      <div className="flex items-center justify-between"><span className="text-slate-600">Base</span><span className="font-medium text-slate-900">{fmtIDR(r.basePrice)}</span></div>
-                      <div className="flex items-center justify-between"><span className="text-slate-600">Extra time</span><span className="font-medium text-slate-900">{extraMin} min ({blocks} x 60 min)</span></div>
-                      <div className="flex items-center justify-between"><span className="text-slate-600">Extra cost</span><span className="font-medium text-slate-900">{fmtIDR(extrasCost)}</span></div>
+                      {breakdownRows.map((row) => (
+                        <div key={row.label} className="flex items-center justify-between"><span className="text-slate-600">{row.label}</span><span className="font-medium text-slate-900">{row.value}</span></div>
+                      ))}
                       <div className="my-2 h-px bg-slate-200" />
                       <div className="flex items-center justify-between text-base"><span className="font-semibold text-slate-900">Total</span><span className="font-semibold text-slate-900">{fmtIDR(total)}</span></div>
                     </div>

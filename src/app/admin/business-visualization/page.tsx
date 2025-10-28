@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Select } from "@/app/components/ui/select";
 import { Button } from "@/app/components/ui/button";
 import { api } from "@/app/lib/api";
-type PackageId = "1h" | "3h" | "12h" | "1d";
+type PackageId = "1h" | "3h" | "12h" | "1d" | "custom";
 type TrendMetric = "rides" | "minutes" | "revenue";
 type TrendPoint = { date: string; rides: number; minutes: number; revenue: number };
 type TopResort = {
@@ -1049,6 +1049,7 @@ export default function BusinessVisualizationPage() {
                         <th className="px-3 py-2 font-medium">3 Hour Packages</th>
                         <th className="px-3 py-2 font-medium">12 Hour Packages</th>
                         <th className="px-3 py-2 font-medium">1 Day Packages</th>
+                        <th className="px-3 py-2 font-medium">Special Packages</th>
                         <th className="px-3 py-2 font-medium">Minutes</th>
                         <th className="px-3 py-2 font-medium">Revenue</th>
                       </tr>
@@ -1079,6 +1080,9 @@ export default function BusinessVisualizationPage() {
                              <td className="px-3 py-2 text-slate-700">
                               {formatNumber.format(packageCounts["1d"] ?? 0)}
                             </td>
+                             <td className="px-3 py-2 text-slate-700">
+                              {formatNumber.format(packageCounts["custom"] ?? 0)}
+                            </td>
                             <td className="px-3 py-2 text-slate-700">{formatNumber.format(row.minutes)}</td>
                             <td className="px-3 py-2 text-emerald-600">{formatIDR.format(row.revenue)}</td>
                           </tr>
@@ -1095,158 +1099,81 @@ export default function BusinessVisualizationPage() {
       </main>
 
       {recommendationModalOpen && (
-
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
-
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={closeRecommendationModal} />
-
           <div className="relative z-10 w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-3xl bg-white shadow-2xl">
-
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-
               <div>
-
                 <h3 className="text-lg font-semibold text-slate-900">Reflow agent recommendations</h3>
-
                 <p className="text-sm text-slate-500">{modalSubheading}</p>
-
               </div>
-
               <button
-
                 type="button"
-
                 onClick={closeRecommendationModal}
-
                 className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
-
               >
-
                 Close
-
               </button>
-
             </div>
-
             <div className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-5 text-sm text-slate-700">
-
               {insights ? (
-
                 <>
-
                   {structuredInsights?.summary?.length ? (
-
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 leading-relaxed">
-
                       {structuredInsights.summary.map((paragraph, index) => (
-
                         <p key={`modal-summary-${index}`} className={index > 0 ? 'mt-3' : undefined}>{paragraph}</p>
-
                       ))}
-
                     </div>
-
                   ) : null}
-
                   {structuredInsights && structuredInsights.hasStructuredContent ? (
-
                     <div className="grid gap-4 md:grid-cols-2">
-
                       {insightSectionConfig.map(({ key, title, description, containerClass, badgeClass, dotClass, barClass, countBadgeClass }) => {
-
                         const items = structuredInsights ? structuredInsights[key] : [];
-
                         return (
-
                           <div key={`modal-${key}`} className={`relative flex flex-col overflow-hidden rounded-2xl border p-5 shadow-sm ${containerClass}`}>
-
                             <span className={`absolute inset-x-6 top-0 h-1 rounded-b-full ${barClass}`} />
-
                             <div className="flex items-start justify-between gap-3 pt-1">
-
                               <div>
-
                                 <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${badgeClass}`}>{title}</span>
-
                                 <p className="mt-3 text-xs text-slate-600">{description}</p>
-
                               </div>
-
                               {items.length > 0 && (
-
                                 <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${countBadgeClass}`}>{items.length}</span>
-
                               )}
-
                             </div>
-
                             {items.length > 0 ? (
-
                               <ul className="mt-4 space-y-3 text-sm leading-relaxed text-slate-800">
-
                                 {items.map((item, insightIndex) => (
-
                                   <li key={`${key}-item-${insightIndex}`} className="flex items-start gap-3">
-
                                     <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`} />
-
                                     <span>{item}</span>
-
                                   </li>
-
                                 ))}
-
                               </ul>
-
                             ) : (
-
                               <p className="mt-4 text-sm text-slate-500">No highlights captured for this category yet.</p>
-
                             )}
-
                           </div>
-
                         );
-
                       })}
-
                     </div>
-
                   ) : (
-
                     <div className="whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
-
                       {insights.text}
-
                     </div>
-
                   )}
-
                 </>
-
               ) : (
-
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
-
                   Ask the Reflow Agent to generate recommendations first.
-
                 </div>
-
               )}
-
             </div>
-
           </div>
-
         </div>
-
       )}
-
-
     </>
-
   );
-
 }
 
 

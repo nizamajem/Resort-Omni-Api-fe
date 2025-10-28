@@ -7,6 +7,15 @@ import { api } from "@/app/lib/api";
 type PackageId = '1h' | '3h' | '12h' | '1d';
 type RentalExtraKey = 'extraGraceMinutes' | 'extraBlockMinutes' | 'extraHourlyRate';
 type PackageRole = 'resort' | 'partnership';
+type CustomPackageConfig = {
+  id: string;
+  name: string;
+  blockMinutes: number;
+  pricePerBlock: number;
+  enabled?: boolean;
+  description?: string | null;
+  roles?: PackageRole[];
+};
 
 type FeatureConfig = {
   packages: Record<PackageId, boolean>;
@@ -14,6 +23,7 @@ type FeatureConfig = {
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
   packagePrices: Record<PackageId, number>;
   rentalExtras: Record<RentalExtraKey, number>;
+  customPackages: CustomPackageConfig[];
 };
 
 type ToggleKey = { id: PackageId; label: string; description: string };
@@ -45,8 +55,32 @@ const RENTAL_EXTRA_FIELDS: { key: RentalExtraKey; label: string; description: st
 ];
 
 type RoleSelections = Record<PackageId, Record<PackageRole, boolean>>;
+type CustomPackageDraft = {
+  key: string;
+  id: string;
+  name: string;
+  blockMinutes: string;
+  pricePerBlock: string;
+  enabled: boolean;
+  description: string;
+  roles: Record<PackageRole, boolean>;
+};
 
 const createDefaultRoleSelection = (): Record<PackageRole, boolean> => ({ resort: true, partnership: true });
+const normalizeCustomRoles = (roles?: PackageRole[] | null): Record<PackageRole, boolean> => {
+  const next: Record<PackageRole, boolean> = { resort: false, partnership: false };
+  if (Array.isArray(roles)) {
+    roles.forEach((role) => {
+      if (role === 'resort' || role === 'partnership') {
+        next[role] = true;
+      }
+    });
+  }
+  if (!next.resort && !next.partnership) {
+    return { resort: true, partnership: true };
+  }
+  return next;
+};
 const computeRoleSelections = (config: FeatureConfig | null): RoleSelections => {
   const base = {} as RoleSelections;
   PACKAGE_IDS.forEach((id) => {
@@ -63,6 +97,32 @@ const computeRoleSelections = (config: FeatureConfig | null): RoleSelections => 
   });
   return base;
 };
+const slugifyId = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+const toCustomDraft = (pkg: CustomPackageConfig, index: number): CustomPackageDraft => ({
+  key: pkg.id || `existing-${index}`,
+  id: pkg.id || '',
+  name: pkg.name || '',
+  blockMinutes: pkg.blockMinutes !== undefined ? String(pkg.blockMinutes) : '',
+  pricePerBlock: pkg.pricePerBlock !== undefined ? String(pkg.pricePerBlock) : '',
+  enabled: pkg.enabled !== false,
+  description: pkg.description ? String(pkg.description) : '',
+  roles: normalizeCustomRoles(pkg.roles),
+});
+const createEmptyCustomDraft = (): CustomPackageDraft => ({
+  key: `new-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+  id: '',
+  name: '',
+  blockMinutes: '',
+  pricePerBlock: '',
+  enabled: true,
+  description: '',
+  roles: normalizeCustomRoles(['resort', 'partnership']),
+});
 
 export default function AdminSettingsPage() {
   const [features, setFeatures] = useState<FeatureConfig | null>(null);
@@ -77,6 +137,10 @@ export default function AdminSettingsPage() {
   const [extraInputs, setExtraInputs] = useState<Record<RentalExtraKey, string>>({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
   const [extraSaving, setExtraSaving] = useState<RentalExtraKey | null>(null);
   const [roleSelections, setRoleSelections] = useState<RoleSelections>(() => computeRoleSelections(null));
+  const [customDrafts, setCustomDrafts] = useState<CustomPackageDraft[]>([]);
+  const [customSaving, setCustomSaving] = useState(false);
+  const [customNotice, setCustomNotice] = useState<string | null>(null);
+  const [customError, setCustomError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -100,6 +164,9 @@ export default function AdminSettingsPage() {
       setPriceInputs({ '1h': '', '3h': '', '12h': '', '1d': '' });
       setExtraInputs({ extraGraceMinutes: '', extraBlockMinutes: '', extraHourlyRate: '' });
       setRoleSelections(computeRoleSelections(null));
+      setCustomDrafts([]);
+      setCustomNotice(null);
+      setCustomError(null);
       return;
     }
     setPriceInputs({
@@ -114,6 +181,9 @@ export default function AdminSettingsPage() {
       extraHourlyRate: features.rentalExtras?.extraHourlyRate !== undefined ? String(features.rentalExtras.extraHourlyRate) : '',
     });
     setRoleSelections(computeRoleSelections(features));
+    setCustomDrafts(Array.isArray(features.customPackages) ? features.customPackages.map((pkg, index) => toCustomDraft(pkg, index)) : []);
+    setCustomNotice(null);
+    setCustomError(null);
   }, [features]);
 
   const updateFeature = async (type: 'packages' | 'payments', id: string, next: boolean) => {
@@ -193,7 +263,7 @@ export default function AdminSettingsPage() {
     setExtraInputs((prev) => ({ ...prev, [key]: sanitized }));
   };
 
-  const saveExtra = async (key: RentalExtraKey) => {
+const saveExtra = async (key: RentalExtraKey) => {
   const raw = extraInputs[key];
   if (raw === '') {
     setError('Please enter a value before saving.');
@@ -220,12 +290,95 @@ export default function AdminSettingsPage() {
     setFeatures((data || null) as FeatureConfig | null);
 
     setMessage('Changes saved.');
-  } catch (e) {
+  } catch {
     setError('Failed to save value.');
   } finally {
     setExtraSaving(null);
   }
 };
+
+  const updateCustomDraft = (draftKey: string, patch: Partial<CustomPackageDraft>) => {
+    setCustomDrafts((prev) => prev.map((item) => (item.key === draftKey ? { ...item, ...patch } : item)));
+    setCustomNotice(null);
+    setCustomError(null);
+  };
+
+  const removeCustomDraft = (draftKey: string) => {
+    setCustomDrafts((prev) => prev.filter((item) => item.key !== draftKey));
+    setCustomNotice(null);
+    setCustomError(null);
+  };
+
+  const addCustomDraft = () => {
+    setCustomDrafts((prev) => [...prev, createEmptyCustomDraft()]);
+    setCustomNotice(null);
+    setCustomError(null);
+  };
+
+  const saveCustomPackages = async () => {
+    setCustomSaving(true);
+    setCustomNotice(null);
+    setCustomError(null);
+    try {
+      const payload: CustomPackageConfig[] = [];
+      const seen = new Set<string>();
+      for (const draft of customDrafts) {
+        const name = draft.name.trim();
+        if (!name) {
+          setCustomError('Please provide a name for each custom package.');
+          return;
+        }
+        const minutes = Number(draft.blockMinutes);
+        if (!Number.isFinite(minutes) || minutes <= 0) {
+          setCustomError('Block duration must be a positive number of minutes.');
+          return;
+        }
+        const rate = Number(draft.pricePerBlock);
+        if (!Number.isFinite(rate) || rate <= 0) {
+          setCustomError('Price per block must be a positive amount.');
+          return;
+        }
+        const slugSource = draft.id.trim() || name;
+        const slug = slugifyId(slugSource);
+        if (!slug) {
+          setCustomError('Unable to generate an ID for one of the custom packages. Adjust the name and try again.');
+          return;
+        }
+        if (seen.has(slug)) {
+          setCustomError('Duplicate custom package detected. Please use unique names or IDs.');
+          return;
+        }
+        seen.add(slug);
+        const selectedRoles = (Object.entries(draft.roles || {}) as [PackageRole, boolean][])
+          .filter(([, value]) => value)
+          .map(([role]) => role);
+        if (selectedRoles.length === 0) {
+          setCustomError('Select at least one account type for each custom package.');
+          return;
+        }
+        const entry: CustomPackageConfig = {
+          id: slug,
+          name,
+          blockMinutes: Math.round(minutes),
+          pricePerBlock: Math.round(rate),
+          enabled: draft.enabled,
+          roles: selectedRoles,
+        };
+        const desc = draft.description.trim();
+        if (desc) {
+          entry.description = desc;
+        }
+        payload.push(entry);
+      }
+      const { data } = await api.put('/settings/features', { customPackages: payload });
+      setFeatures((data || null) as FeatureConfig | null);
+      setCustomNotice('Custom packages saved.');
+    } catch {
+      setCustomError('Failed to save custom packages.');
+    } finally {
+      setCustomSaving(false);
+    }
+  };
 
 
   return (
@@ -339,13 +492,160 @@ export default function AdminSettingsPage() {
                 </div>
               );
             })}
+        </div>
+      </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">Custom Packages</h2>
+            <p className="text-sm text-slate-600">Define tiered billing packages with custom block durations and rates.</p>
+          </div>
+          {customError && (
+            <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{customError}</div>
+          )}
+          {customNotice && (
+            <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{customNotice}</div>
+          )}
+          <div className="space-y-4">
+            {customDrafts.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+                No custom packages yet. Add one to offer flexible billing.
+              </div>
+            ) : (
+              customDrafts.map((draft) => {
+                const slugPreview = slugifyId(draft.id || draft.name);
+                const disabled = loading || customSaving;
+                const minutesPreview = Number(draft.blockMinutes);
+                const pricePreview = Number(draft.pricePerBlock);
+                const previewLabel =
+                  Number.isFinite(minutesPreview) && minutesPreview > 0 && Number.isFinite(pricePreview) && pricePreview > 0
+                    ? `${formatIDR(pricePreview)} per ${minutesPreview} minute block`
+                    : 'Set block duration and price to see the preview';
+                return (
+                  <div key={draft.key} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex-1">
+                        <label className="text-xs font-medium text-slate-600">Package name</label>
+                        <input
+                          value={draft.name}
+                          onChange={(event) => updateCustomDraft(draft.key, { name: event.target.value })}
+                          disabled={disabled}
+                          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
+                          placeholder="e.g. Special Package"
+                        />
+                      </div>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-slate-600">Enabled</span>
+                        <Switch checked={draft.enabled} disabled={disabled} onChange={(next) => updateCustomDraft(draft.key, { enabled: next })} />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-700">
+                        <span className="font-medium text-slate-600">Available for</span>
+                        {ROLE_OPTIONS.map((roleOption) => {
+                          const checked = !!draft.roles[roleOption.id];
+                          return (
+                            <label key={roleOption.id} className="flex items-center gap-2">
+                              <Switch
+                                checked={checked}
+                                disabled={disabled}
+                                onChange={(next) => {
+                                  const nextRoles = { ...draft.roles, [roleOption.id]: next } as Record<PackageRole, boolean>;
+                                  updateCustomDraft(draft.key, { roles: nextRoles });
+                                }}
+                              />
+                              <span>{roleOption.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Block duration (minutes)</label>
+                        <input
+                          value={draft.blockMinutes}
+                          onChange={(event) => updateCustomDraft(draft.key, { blockMinutes: event.target.value.replace(/[^0-9]/g, '') })}
+                          disabled={disabled}
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
+                          placeholder="e.g. 10"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Price per block</label>
+                        <div className="mt-1 flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 shadow-sm">
+                          <span className="mr-2 text-xs font-medium text-slate-500">Rp</span>
+                          <input
+                            value={draft.pricePerBlock}
+                            onChange={(event) => updateCustomDraft(draft.key, { pricePerBlock: event.target.value.replace(/[^0-9]/g, '') })}
+                            disabled={disabled}
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            className="h-6 w-full border-none bg-transparent text-right text-sm font-semibold text-slate-900 outline-none focus:ring-0"
+                            placeholder="e.g. 20000"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Package ID</label>
+                        <div className="mt-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono text-slate-700 shadow-sm">
+                          {slugPreview || 'auto-generated'}
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Notes (optional)</label>
+                      <textarea
+                        value={draft.description}
+                        onChange={(event) => updateCustomDraft(draft.key, { description: event.target.value })}
+                        disabled={disabled}
+                        rows={2}
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
+                        placeholder="Optional internal note for this package"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-xs text-slate-500">{previewLabel}</div>
+                      <button
+                        type="button"
+                        onClick={() => removeCustomDraft(draft.key)}
+                        disabled={disabled}
+                        className="self-end rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={addCustomDraft}
+              disabled={loading || customSaving}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Add custom package
+            </button>
+            <button
+              type="button"
+              onClick={saveCustomPackages}
+              disabled={loading || customSaving}
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {customSaving ? 'Saving...' : 'Save custom packages'}
+            </button>
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4">
             <h2 className="text-lg font-semibold text-slate-900">Rental Extras</h2>
-            <p className="text-sm text-slate-600">Configure grace period and overtime charges shown on the dashboard.</p>
+            <p className="text-sm text-slate-600">Configure grace period and overtime charges shown on the dashboard. This function is not applicable for custom packages.</p>
           </div>
           <div className="space-y-4">
             {RENTAL_EXTRA_FIELDS.map((field) => {

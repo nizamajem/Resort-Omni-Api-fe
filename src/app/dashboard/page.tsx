@@ -1,24 +1,42 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import MidtransPopup from "@/app/components/midtrans.popup";
 import { api } from "@/app/lib/api";
 import { useAuth } from "@/app/auth.context";
 
-type Pkg = { id: "1h" | "3h" | "12h" | "1d"; title: string; desc: string; price: number; unit: string };
-
+type BasePackageId = "1h" | "3h" | "12h" | "1d";
+type BasePackage = { id: BasePackageId; title: string; desc: string; price: number; unit: string };
+type CustomPackageConfig = { id: string; name: string; blockMinutes: number; pricePerBlock: number; enabled?: boolean; description?: string | null; roles?: PackageRole[] };
+type OrderablePackage = {
+  key: string;
+  kind: "standard" | "custom";
+  packageId: string;
+  isCustom: boolean;
+  title: string;
+  description: string;
+  price: number;
+  unit: string;
+  baseMinutes: number;
+  pricePerBlock?: number;
+  blockMinutes?: number;
+  customConfigId?: string;
+  customMeta?: CustomPackageConfig;
+};
 type RentalExtrasConfig = { extraGraceMinutes: number; extraHourlyRate: number; extraBlockMinutes?: number };
 
 type PackageRole = 'resort' | 'partnership';
 type FeatureConfig = {
-  packages: Record<Pkg['id'], boolean>;
-  packageRoles: Record<Pkg['id'], PackageRole[]>;
+  packages: Record<BasePackageId, boolean>;
+  packageRoles: Record<BasePackageId, PackageRole[]>;
   payments: { cash: boolean; midtransSandbox: boolean; midtransProduction: boolean };
-  packagePrices: Record<Pkg['id'], number>;
+  packagePrices: Record<BasePackageId, number>;
   rentalExtras: RentalExtrasConfig;
+  customPackages: CustomPackageConfig[];
 };
-type AvailabilityState = Record<Pkg['id'], number> & {
-  enabled: Record<Pkg['id'], boolean>;
+type AvailabilityState = {
+  counts: Record<string, number>;
+  enabled: Record<string, boolean>;
 };
 
 type PaymentOption = 'cash' | 'midtransSandbox' | 'midtransProduction';
@@ -49,7 +67,7 @@ export default function DashboardPage() {
     const raw = `${prefix}${timePart}${randomPart}${suffix}`;
     return raw.slice(0, 48);
   };
-  const basePackages = useMemo<Pkg[]>(
+  const basePackages = useMemo<BasePackage[]>(
     () => [
       { id: "1h", title: "1 Hour", desc: "Perfect for short city rides.", price: 65000, unit: "hour" },
       { id: "3h", title: "3 Hours", desc: "Explore more with extra time.", price: 125000, unit: "3 hours" },
@@ -73,17 +91,69 @@ export default function DashboardPage() {
     return { grace, rate, block };
   }, [features]);
 
-  const isPackageEnabledForRole = (pkgId: Pkg["id"]) => {
+  const isPackageEnabledForRole = useCallback((pkgId: string, isCustom: boolean) => {
     if (!features) return true;
-    if (features.packages?.[pkgId] === false) return false;
+    if (isCustom) {
+      const custom = Array.isArray(features.customPackages)
+        ? features.customPackages.find((item) => item && item.id === pkgId && item.enabled !== false)
+        : null;
+      if (!custom) {
+        return false;
+      }
+      if (effectiveRole === 'superadmin') {
+        return true;
+      }
+      const allowedRoles: PackageRole[] =
+        Array.isArray(custom.roles) && custom.roles.length > 0
+          ? custom.roles.filter((role): role is PackageRole => role === 'resort' || role === 'partnership')
+          : (['resort', 'partnership'] as PackageRole[]);
+      if (allowedRoles.length === 0) {
+        return true;
+      }
+      return allowedRoles.includes(effectiveRole as PackageRole);
+    }
+    const baseId = pkgId as BasePackageId;
+    if (features.packages?.[baseId] === false) return false;
     if (effectiveRole === 'superadmin') return true;
-    const allowed = features.packageRoles?.[pkgId];
+    const allowed = features.packageRoles?.[baseId];
     if (!allowed || allowed.length === 0) return true;
-    return allowed.includes(effectiveRole);
+    return allowed.includes(effectiveRole as PackageRole);
+  }, [features, effectiveRole]);
+  const baseMinutesFor = (pkgId: BasePackageId) => (pkgId === "1h" ? 60 : pkgId === "3h" ? 180 : pkgId === "12h" ? 720 : 1440);
+  const normalizeAvailability = (raw: any): AvailabilityState => {
+    const counts: Record<string, number> = {};
+    if (raw && typeof raw === "object") {
+      Object.entries(raw).forEach(([key, value]) => {
+        if (key === "enabled" || key === "customPackages") return;
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+          counts[key] = Math.max(0, Math.round(numeric));
+        }
+      });
+    }
+    const enabledSource = raw?.enabled && typeof raw.enabled === "object" ? raw.enabled : {};
+    const enabled: Record<string, boolean> = {};
+    Object.keys(counts).forEach((key) => {
+      enabled[key] = enabledSource[key] !== false;
+    });
+    Object.keys(enabledSource).forEach((key) => {
+      if (!(key in enabled)) {
+        enabled[key] = enabledSource[key] !== false;
+      }
+      if (!(key in counts)) {
+        counts[key] = 0;
+      }
+    });
+    (['1h', '3h', '12h', '1d'] as BasePackageId[]).forEach((id) => {
+      if (!(id in counts)) counts[id] = 0;
+      if (!(id in enabled)) enabled[id] = enabled[id] ?? true;
+    });
+    return { counts, enabled };
   };
 
-  const packages = useMemo(() => {
-    const withPricing = basePackages.map((pkg) => {
+  const packages = useMemo<OrderablePackage[]>(() => {
+    const next: OrderablePackage[] = [];
+    const pricedBase = basePackages.map((pkg) => {
       const override = features?.packagePrices?.[pkg.id];
       const numeric = Number(override);
       if (Number.isFinite(numeric) && numeric > 0) {
@@ -91,8 +161,57 @@ export default function DashboardPage() {
       }
       return pkg;
     });
-    return withPricing.filter((pkg) => isPackageEnabledForRole(pkg.id));
-  }, [basePackages, features, effectiveRole]);
+    pricedBase
+      .filter((pkg) => isPackageEnabledForRole(pkg.id, false))
+      .forEach((pkg) => {
+        next.push({
+          key: pkg.id,
+          kind: "standard",
+          packageId: pkg.id,
+          isCustom: false,
+          title: pkg.title,
+          description: pkg.desc,
+          price: pkg.price,
+          unit: pkg.unit,
+          baseMinutes: baseMinutesFor(pkg.id),
+        });
+      });
+    const customList = Array.isArray(features?.customPackages) ? features.customPackages.filter((item) => item && item.enabled !== false) : [];
+    customList.forEach((item) => {
+      const slug = typeof item.id === 'string' ? item.id.trim() : '';
+      if (!slug) {
+        return;
+      }
+      if (!isPackageEnabledForRole(slug, true)) {
+        return;
+      }
+      const blockMinutesRaw = Number(item.blockMinutes);
+      const rateRaw = Number(item.pricePerBlock);
+      const blockMinutes = Number.isFinite(blockMinutesRaw) && blockMinutesRaw > 0 ? Math.max(1, Math.round(blockMinutesRaw)) : 1;
+      const pricePerBlock = Number.isFinite(rateRaw) && rateRaw > 0 ? Math.round(rateRaw) : 0;
+      if (pricePerBlock <= 0) {
+        return;
+      }
+      const name = (item.name || '').trim() || 'Custom Package';
+      const description = (item.description || '').trim() || `Charged every ${blockMinutes} minute${blockMinutes > 1 ? 's' : ''}.`;
+      next.push({
+        key: `custom-${slug}-${blockMinutes}-${pricePerBlock}`,
+        kind: "custom",
+        packageId: slug,
+        isCustom: true,
+        title: name,
+        description,
+        price: pricePerBlock,
+        unit: `Per ${blockMinutes} minute${blockMinutes > 1 ? 's' : ''}`,
+        baseMinutes: blockMinutes,
+        pricePerBlock,
+        blockMinutes,
+        customConfigId: slug,
+        customMeta: item,
+      });
+    });
+    return next;
+  }, [basePackages, features, effectiveRole, isPackageEnabledForRole]);
 
   const cashEnabled = features ? !!features.payments.cash : true;
   const sandboxEnabled = features ? !!features.payments.midtransSandbox : true;
@@ -106,8 +225,8 @@ export default function DashboardPage() {
   }, [cashEnabled, sandboxEnabled, productionEnabled]);
   const hasAnyPayment = availablePayments.length > 0;
 
-  const [detailFor, setDetailFor] = useState<Pkg | null>(null);
-  const [orderFor, setOrderFor] = useState<Pkg | null>(null);
+  const [detailFor, setDetailFor] = useState<OrderablePackage | null>(null);
+  const [orderFor, setOrderFor] = useState<OrderablePackage | null>(null);
   const [guestInfoOpen, setGuestInfoOpen] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [roomNumber, setRoomNumber] = useState("");
@@ -129,7 +248,6 @@ export default function DashboardPage() {
   const [snapContext, setSnapContext] = useState<{ mode: 'extras'; rentalId?: string; amount?: number; paymentMode?: OnlinePaymentOption } | null>(null);
   const [processing, setProcessing] = useState(false);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
-  const [lastOrderId, setLastOrderId] = useState<string | null>(null);
   const [cred, setCred] = useState<{ email: string; password: string } | null>(null);
   const [availability, setAvailability] = useState<AvailabilityState | null>(null);
   const [nowTick, setNowTick] = useState(0);
@@ -146,7 +264,7 @@ export default function DashboardPage() {
     guestName: string;
     roomNumber: string;
     resortName: string;
-    pkg: Pkg["id"];
+    pkg: string;
     packageName: string;
     basePrice: number;
     baseMinutes: number;
@@ -156,6 +274,12 @@ export default function DashboardPage() {
     amountDue?: number;
     email: string;
     credentialEmail?: string;
+    billingMode?: 'standard' | 'tiered';
+    customPackageId?: string;
+    customBlockMinutes?: number;
+    customBlockRate?: number;
+    customBlocksUsed?: number;
+    customElapsedMinutes?: number;
   };
   const [running, setRunning] = useState<RunningRental[]>([]);
 
@@ -174,6 +298,8 @@ export default function DashboardPage() {
         email: '',
       } as RunningRental;
     }
+    const pkgRaw = typeof raw?.pkg === 'string' ? raw.pkg.trim() : '';
+    const pkgResolved = pkgRaw.length > 0 ? pkgRaw : '1h';
     const started = typeof raw.startedAt === 'number' ? raw.startedAt : Number(raw.startedAt ?? Date.now());
     const ended = raw.endedAt === null || raw.endedAt === undefined ? undefined : Number(raw.endedAt);
     const due = raw.amountDue === null || raw.amountDue === undefined ? undefined : Number(raw.amountDue);
@@ -184,13 +310,17 @@ export default function DashboardPage() {
     const credentialResolved = credentialEmail || relatedCredentialEmail || rawEmail;
     const rawResortName = typeof raw?.resortName === 'string' ? raw.resortName.trim() : '';
     const resortResolved = rawResortName || (resortName || '');
+    const customMinutesRaw = Number(raw.customBlockMinutes);
+    const customRateRaw = Number(raw.customBlockRate);
+    const customBlocksUsedRaw = Number(raw.customBlocksUsed);
+    const customElapsedRaw = Number(raw.customElapsedMinutes);
 
     const normalized: RunningRental = {
       id: String(raw.id ?? ''),
       guestName: raw.guestName ?? 'Guest',
       roomNumber: raw.roomNumber ?? '-',
       resortName: resortResolved,
-      pkg: (raw.pkg ?? '1h') as RunningRental['pkg'],
+      pkg: pkgResolved,
       packageName: raw.packageName ?? raw.pkg ?? 'Package',
       basePrice: Number(raw.basePrice ?? 0),
       baseMinutes: Number(raw.baseMinutes ?? 0),
@@ -200,8 +330,24 @@ export default function DashboardPage() {
       amountDue: Number.isFinite(due ?? NaN) ? due : undefined,
       email: emailResolved,
       credentialEmail: credentialResolved || undefined,
+      billingMode: raw.billingMode === 'tiered' ? 'tiered' : 'standard',
+      customPackageId: typeof raw.customPackageId === 'string' && raw.customPackageId.trim() ? raw.customPackageId.trim() : undefined,
+      customBlockMinutes: Number.isFinite(customMinutesRaw) && customMinutesRaw > 0 ? Math.round(customMinutesRaw) : undefined,
+      customBlockRate: Number.isFinite(customRateRaw) && customRateRaw > 0 ? Math.round(customRateRaw) : undefined,
+      customBlocksUsed: Number.isFinite(customBlocksUsedRaw) && customBlocksUsedRaw >= 0 ? Math.round(customBlocksUsedRaw) : undefined,
+      customElapsedMinutes: Number.isFinite(customElapsedRaw) && customElapsedRaw >= 0 ? Math.round(customElapsedRaw) : undefined,
     };
-    const sanitized: any = { ...raw, ...normalized, credentialEmail: credentialResolved };
+    const sanitized: any = {
+      ...raw,
+      ...normalized,
+      credentialEmail: credentialResolved,
+      billingMode: normalized.billingMode,
+      customPackageId: normalized.customPackageId,
+      customBlockMinutes: normalized.customBlockMinutes,
+      customBlockRate: normalized.customBlockRate,
+      customBlocksUsed: normalized.customBlocksUsed,
+      customElapsedMinutes: normalized.customElapsedMinutes,
+    };
     if (Object.prototype.hasOwnProperty.call(sanitized, 'credentialPassword')) {
       delete sanitized.credentialPassword;
     }
@@ -267,7 +413,7 @@ export default function DashboardPage() {
     const run = async () => {
       try {
         const { data } = await api.get("/orders/availability");
-        setAvailability(data as AvailabilityState);
+        setAvailability(normalizeAvailability(data));
       } catch { }
     };
     run();
@@ -321,12 +467,13 @@ export default function DashboardPage() {
       setSelectedPayment(null);
     }
   }, [availablePayments, selectedPayment]);
-  const canOrder = (id: Pkg["id"]) => {
+  const canOrder = (pkg: OrderablePackage) => {
     if (!hasAnyPayment) return false;
-    if (!isPackageEnabledForRole(id)) return false;
-    if (availability?.enabled && availability.enabled[id] === false) return false;
-    if (!availability) return true; // optimistic until fetched
-    return (availability[id] || 0) > 0;
+    if (!isPackageEnabledForRole(pkg.packageId, pkg.isCustom)) return false;
+    if (!availability) return true;
+    if (availability.enabled && availability.enabled[pkg.packageId] === false) return false;
+    const count = availability.counts?.[pkg.packageId] ?? 0;
+    return count > 0;
   };
 
 
@@ -340,11 +487,11 @@ export default function DashboardPage() {
     return fallback || '-';
   };
 
-  const onDetail = (p: Pkg) => {
+  const onDetail = (p: OrderablePackage) => {
     setDetailFor(p);
   };
 
-  const onOrder = (p: Pkg) => {
+  const onOrder = (p: OrderablePackage) => {
     if (!hasAnyPayment) {
       setResultMsg('No payment methods are active. Please contact the super admin to enable them.');
       return;
@@ -367,15 +514,21 @@ export default function DashboardPage() {
     setAgreeChecked(false);
     setProcessing(true);
     try {
-      const { data } = await api.post("/orders/cash", {
-        pkg: orderFor.id,
+      const payload: Record<string, any> = {
+        pkg: orderFor.packageId,
         packageName: orderFor.title,
         price: orderFor.price,
         duration: orderFor.unit,
         resortName: resortName || "",
         guestName,
         roomNumber,
-      });
+      };
+      if (orderFor.kind === "custom") {
+        payload.customPackageId = orderFor.customConfigId;
+        payload.customBlockMinutes = orderFor.blockMinutes;
+        payload.customBlockRate = orderFor.pricePerBlock ?? orderFor.price;
+      }
+      const { data } = await api.post("/orders/cash", payload);
       if (!data || (data as any)?.error) {
         setResultMsg(((data as any)?.error) || "Failed to record cash order.");
       } else {
@@ -391,8 +544,8 @@ export default function DashboardPage() {
               setResultMsg('Rental started. Credentials ready.');
               return;
             }
-            const { data: r } = await api.post('/rentals/start', {
-              pkg: orderFor.id,
+            const startPayload: Record<string, any> = {
+              pkg: orderFor.packageId,
               packageName: orderFor.title,
               price: orderFor.price,
               duration: orderFor.unit,
@@ -401,7 +554,14 @@ export default function DashboardPage() {
               resortName: resortName || undefined,
               credentialEmail: c?.email || undefined,
               credentialPassword: c?.password || undefined,
-            });
+            };
+            if (orderFor.kind === 'custom') {
+              startPayload.billingMode = 'tiered';
+              startPayload.customPackageId = orderFor.customConfigId;
+              startPayload.customBlockMinutes = orderFor.blockMinutes;
+              startPayload.customBlockRate = orderFor.pricePerBlock ?? orderFor.price;
+            }
+            const { data: r } = await api.post('/rentals/start', startPayload);
             if (r && r.id) {
               setRunning((prev) => ([...prev, normalizeRental({ ...r, resortName: r?.resortName ?? (resortName || '') })]));
               setResultMsg('Rental started. Credentials ready.');
@@ -411,7 +571,7 @@ export default function DashboardPage() {
             }
           } catch (e: any) {
             // fallback to local so UI shows immediately, and inform user
-            const baseMinutes = orderFor.id === '1h' ? 60 : orderFor.id === '3h' ? 180 : orderFor.id === '12h' ? 720 : 1440;
+            const baseMinutes = orderFor.baseMinutes;
             setRunning((prev) => ([
               ...prev,
               normalizeRental({
@@ -419,13 +579,17 @@ export default function DashboardPage() {
                 guestName: guestName || 'Guest',
                 roomNumber: roomNumber || '-',
                 resortName: resortName || '',
-                pkg: orderFor.id,
+                pkg: orderFor.packageId,
                 packageName: orderFor.title,
                 basePrice: orderFor.price,
                 baseMinutes,
                 startedAt: Date.now(),
                 status: 'active',
-                email: c?.email || ''
+                email: c?.email || '',
+                billingMode: orderFor.kind === 'custom' ? 'tiered' : 'standard',
+                customPackageId: orderFor.kind === 'custom' ? orderFor.customConfigId : undefined,
+                customBlockMinutes: orderFor.kind === 'custom' ? orderFor.blockMinutes : undefined,
+                customBlockRate: orderFor.kind === 'custom' ? (orderFor.pricePerBlock ?? orderFor.price) : undefined,
               })
             ]));
             setResultMsg('Rental started locally (server start failed). Please verify backend /rentals/start.');
@@ -552,18 +716,23 @@ export default function DashboardPage() {
             No packages are currently available for your role. Please contact the super admin.
           </div>
         ) : packages.map((p) => {
-          const orderEnabled = canOrder(p.id);
-          const disabledReason = !hasAnyPayment
-            ? 'Payment method disabled'
-            : !isPackageEnabledForRole(p.id)
-              ? features?.packages?.[p.id] === false ? 'Disabled by super admin' : 'Not available for your role'
-              : 'Unavailable: no active account';
+          const orderEnabled = canOrder(p);
+          let disabledReason = 'Unavailable';
+          if (!hasAnyPayment) {
+            disabledReason = 'Payment method disabled';
+          } else if (!isPackageEnabledForRole(p.packageId, p.isCustom)) {
+            disabledReason = 'Not available for your role';
+          } else if (availability?.enabled && availability.enabled[p.packageId] === false) {
+            disabledReason = 'Disabled by super admin';
+          } else {
+            disabledReason = 'No credentials available';
+          }
           return (
-            <article key={p.id} className="group rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 transition hover:shadow-md hover:-translate-y-0.5">
+            <article key={p.key} className="group rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 transition hover:shadow-md hover:-translate-y-0.5">
               <div className="flex items-start justify-between">
                 <div>
                   <h2 className="text-lg font-semibold text-slate-900">{p.title}</h2>
-                  <p className="mt-1 text-sm text-slate-600">{p.desc}</p>
+                  <p className="mt-1 text-sm text-slate-600">{p.description}</p>
                 </div>
                 <div className="h-10 w-10 grid place-items-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 19.5l3-9h4.5m0 0L18 6h-3m1.5 4.5 3 3" /></svg>
@@ -573,9 +742,15 @@ export default function DashboardPage() {
                 <div className="text-2xl font-bold text-slate-900">{fmt(p.price)}</div>
                 <div className="text-sm text-slate-500">/ {p.unit}</div>
               </div>
-              <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> price includes 11%VAT and 10% service charge
-              </div>
+              {p.kind === 'custom' ? (
+                <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-500" /> tiered billing per block
+                </div>
+              ) : (
+                <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> price includes 11%VAT and 10% service charge
+                </div>
+              )}
               <div className="mt-6 flex gap-3">
                 <button onClick={() => onDetail(p)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Detail</button>
                 <button
@@ -605,12 +780,23 @@ export default function DashboardPage() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setDetailFor(null)} />
           <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">{detailFor.title}</h3>
-            <p className="mt-2 text-sm text-slate-600">{detailFor.desc}</p>
+            <p className="mt-2 text-sm text-slate-600">{detailFor.description}</p>
 
             <div className="mt-4 rounded-xl bg-slate-50/70 p-4 ring-1 ring-slate-200">
-              <div className="text-sm font-semibold text-slate-800">What you get</div>
+              <div className="text-sm font-semibold text-slate-800">Package details</div>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                <li>{fmt(detailFor.price)} Reflow balance to kickstart your rides</li>
+                <li>
+                  {detailFor.kind === 'custom'
+                    ? `${fmt(detailFor.price)} per ${detailFor.blockMinutes ?? detailFor.baseMinutes} minute block`
+                    : `${fmt(detailFor.price)} package price including ${detailFor.baseMinutes} minutes of ride time`
+                  }
+                </li>
+                <li>
+                  {detailFor.kind === 'custom'
+                    ? 'No overtime penalty - billing follows the selected block duration.'
+                    : 'Overtime follows the resort-wide grace period and hourly charges.'
+                  }
+                </li>
               </ul>
             </div>
 
@@ -620,10 +806,16 @@ export default function DashboardPage() {
                 <li>An internet connection is needed to enjoy the app.</li>
                 <li>Please download and install the Reflow app to unlock and ride your bike.</li>
                 <li>Your rental time begins once your Reflow account is activated.</li>
-                <li>
-                  If you go beyond your rental period, an extra {fmt(extras.rate)} will be added
-                  for each additional {extras.block} minutes (after {extras.grace} minutes grace).
-                </li>
+                {detailFor.kind === 'custom' ? (
+                  <li>
+                    Billing follows the selected block duration; end the rental when the guest returns to stop the timer.
+                  </li>
+                ) : (
+                  <li>
+                    If you go beyond your rental period, an extra {fmt(extras.rate)} will be added
+                    for each additional {extras.block} minutes (after {extras.grace} minutes grace).
+                  </li>
+                )}
 
                 <li>Your rental and ride history are safely stored in our system for your convenience.</li>
               </ol>
@@ -748,15 +940,24 @@ export default function DashboardPage() {
                 <tr><td colSpan={9} className="px-3 py-4 text-center text-slate-500">No running rentals.</td></tr>
               ) : (
                 running.map((r) => {
-                  const base = r.baseMinutes;
                   const end = r.endedAt || Date.now();
                   const elapsedSec = Math.max(0, Math.floor((end - r.startedAt) / 1000));
                   const elapsedMin = Math.max(0, Math.ceil((end - r.startedAt) / 60000));
-                  const extraMinutes = Math.max(0, elapsedMin - base);
-                  const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
-                  const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
-                  const extraCost = extraBlocks * extras.rate;
-                  const charge = r.status === 'active' ? r.basePrice + extraCost : (r.amountDue ?? (r.basePrice + extraCost));
+                  const isTiered = r.billingMode === 'tiered';
+                  let charge = r.basePrice;
+                  if (isTiered) {
+                    const blockMinutes = Math.max(1, Number(r.customBlockMinutes ?? r.baseMinutes));
+                    const blockRate = Number.isFinite(Number(r.customBlockRate)) && Number(r.customBlockRate) > 0 ? Math.round(Number(r.customBlockRate)) : r.basePrice;
+                    const blocksUsed = Math.max(0, Math.ceil(elapsedMin / blockMinutes));
+                    const tierCharge = blocksUsed * blockRate;
+                    charge = r.status === 'active' ? tierCharge : (r.amountDue ?? tierCharge);
+                  } else {
+                    const extraMinutes = Math.max(0, elapsedMin - r.baseMinutes);
+                    const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
+                    const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
+                    const extraCost = extraBlocks * extras.rate;
+                    charge = r.status === 'active' ? r.basePrice + extraCost : (r.amountDue ?? (r.basePrice + extraCost));
+                  }
                   const hours = Math.floor(elapsedSec / 3600);
                   const minutes = Math.floor((elapsedSec % 3600) / 60);
                   const seconds = elapsedSec % 60;
@@ -839,10 +1040,20 @@ export default function DashboardPage() {
                   // Immediately reflect locally so UI always updates
                   const endAt = Date.now();
                   const elapsedM = Math.max(0, Math.ceil((endAt - endTarget.startedAt) / 60000));
-                  const extraMinutes = Math.max(0, elapsedM - endTarget.baseMinutes);
-                  const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
-                  const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
-                  const due = endTarget.basePrice + extraBlocks * extras.rate;
+                  let due: number;
+                  if (endTarget.billingMode === 'tiered') {
+                    const blockMinutes = Math.max(1, Number(endTarget.customBlockMinutes ?? endTarget.baseMinutes));
+                    const blockRate = Number.isFinite(Number(endTarget.customBlockRate)) && Number(endTarget.customBlockRate) > 0
+                      ? Math.round(Number(endTarget.customBlockRate))
+                      : endTarget.basePrice;
+                    const blocksUsed = Math.max(0, Math.ceil(elapsedM / blockMinutes));
+                    due = blocksUsed * blockRate;
+                  } else {
+                    const extraMinutes = Math.max(0, elapsedM - endTarget.baseMinutes);
+                    const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
+                    const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
+                    due = endTarget.basePrice + extraBlocks * extras.rate;
+                  }
 
                   setRunning((prev) => prev.map((x) => x.id === endTarget.id ? { ...x, status: 'unpaid', endedAt: endAt, amountDue: due } : x));
                   setResultMsg('Rental ended. Please proceed to payment.');
@@ -883,11 +1094,45 @@ export default function DashboardPage() {
               const mm = String(Math.floor((durationSec % 3600) / 60)).padStart(2, '0');
               const ss = String(durationSec % 60).padStart(2, '0');
               const durationMin = Math.max(0, Math.ceil((end - start) / 60000));
-              const extraMinutes = Math.max(0, durationMin - payTarget.baseMinutes);
-              const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
-              const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
-              const extrasCost = extraBlocks * extras.rate;
-              const total = payTarget.amountDue ?? (payTarget.basePrice + extrasCost);
+              const isTiered = payTarget.billingMode === 'tiered';
+              let total = payTarget.amountDue ?? payTarget.basePrice;
+              let extraDisplay: JSX.Element | null = null;
+              const breakdownRows: { label: string; value: string }[] = [];
+              if (isTiered) {
+                const blockMinutes = Math.max(1, Number(payTarget.customBlockMinutes ?? payTarget.baseMinutes));
+                const blockRate = Number.isFinite(Number(payTarget.customBlockRate)) && Number(payTarget.customBlockRate) > 0
+                  ? Math.round(Number(payTarget.customBlockRate))
+                  : payTarget.basePrice;
+                const blocksUsed = Math.max(0, Math.ceil(durationMin / blockMinutes));
+                const tierTotal = blocksUsed * blockRate;
+                total = payTarget.amountDue ?? tierTotal;
+                extraDisplay = (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">Blocks consumed</span>
+                    <span className="font-medium text-slate-900">{blocksUsed} x {blockMinutes} min</span>
+                  </div>
+                );
+                breakdownRows.push({ label: `Blocks (${blocksUsed} x ${fmt(blockRate)})`, value: fmt(tierTotal) });
+              } else {
+                const extraMinutes = Math.max(0, durationMin - payTarget.baseMinutes);
+                const chargeableMinutes = Math.max(0, extraMinutes - extras.grace);
+                const extraBlocks = Math.max(0, Math.ceil(chargeableMinutes / extras.block));
+                const extrasCost = extraBlocks * extras.rate;
+                total = payTarget.amountDue ?? (payTarget.basePrice + extrasCost);
+                extraDisplay = (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">Extra time</span>
+                    <span className="font-medium text-slate-900">{extraMinutes} min total / charge {extraBlocks} x {extras.block} min</span>
+                  </div>
+                );
+                breakdownRows.push(
+                  { label: 'Package', value: fmt(payTarget.basePrice) },
+                  {
+                    label: `Extra time (tolerance ${extras.grace} min${extraBlocks > 0 ? ` - ${extraBlocks} x ${extras.block} min` : ''})`,
+                    value: fmt(extrasCost),
+                  }
+                );
+              }
               const startStr = new Date(start).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
               const endStr = new Date(end).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
               return (
@@ -917,27 +1162,17 @@ export default function DashboardPage() {
                       <span className="text-slate-600">Rental duration</span>
                       <span className="font-medium text-slate-900">{hh}:{mm}:{ss}</span>
                     </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-600">Extra time</span>
-                      <span className="font-medium text-slate-900">{extraMinutes} min total / charge {extraBlocks} x {extras.block} min</span>
-                    </div>
+                    {extraDisplay}
                   </div>
                   <div className="mt-4 rounded-xl bg-white p-4 ring-1 ring-slate-200">
                     <div className="text-sm font-semibold text-slate-800">Payment Breakdown</div>
                     <div className="mt-2 space-y-1 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-600">Package</span>
-                        <span className="font-medium text-slate-900">{fmt(payTarget.basePrice)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-600">
-                          Extra time (tolerance {extras.grace} min)
-                          {extraBlocks > 0 && (
-                            <span className="text-slate-500"> - {extraBlocks} x {extras.block} min</span>
-                          )}
-                        </span>
-                        <span className="font-medium text-slate-900">{fmt(extrasCost)}</span>
-                      </div>
+                      {breakdownRows.map((row) => (
+                        <div key={row.label} className="flex items-center justify-between">
+                          <span className="text-slate-600">{row.label}</span>
+                          <span className="font-medium text-slate-900">{row.value}</span>
+                        </div>
+                      ))}
                       <div className="my-2 h-px bg-slate-200" />
                       <div className="flex items-center justify-between text-base">
                         <span className="font-semibold text-slate-900">Total</span>
@@ -1056,6 +1291,8 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+
 
 
 

@@ -7,15 +7,10 @@ import { Select } from "@/app/components/ui/select";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 
+type BasePkgId = "1h" | "3h" | "12h" | "1d";
 type PackageAccount = { id: string; pkg: string; email: string; password: string; status: "active" | "sold"; createdAt?: string };
 type PackageOption = { id: string; label: string; description: string; isCustom: boolean };
 type CustomPackageMeta = { id: string; name: string; blockMinutes: number; pricePerBlock: number; description?: string | null; enabled?: boolean };
-const BASE_PACKAGE_OPTIONS: PackageOption[] = [
-  { id: "1h", label: "1 Hour", description: "Short ride package.", isCustom: false },
-  { id: "3h", label: "3 Hours", description: "Medium ride package.", isCustom: false },
-  { id: "12h", label: "12 Hours", description: "Full day ride (12 hours).", isCustom: false },
-  { id: "1d", label: "1 Day", description: "Unlimited day ride.", isCustom: false },
-];
 
 const API_BASE = (() => {
   const env = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL);
@@ -30,6 +25,13 @@ export default function AdminPackagesAddPage() {
   }, []);
 
   // Add form state
+  const BASE_PACKAGE_OPTIONS: PackageOption[] = [
+    { id: "1h", label: "1 Hour", description: "Short ride package.", isCustom: false },
+    { id: "3h", label: "3 Hours", description: "Medium ride package.", isCustom: false },
+    { id: "12h", label: "12 Hours", description: "Full day ride (12 hours).", isCustom: false },
+    { id: "1d", label: "1 Day", description: "Unlimited day ride.", isCustom: false },
+  ];
+
   const [customPackages, setCustomPackages] = useState<CustomPackageMeta[]>([]);
   const packageOptions = useMemo<PackageOption[]>(() => {
     const dynamic = customPackages
@@ -41,7 +43,7 @@ export default function AdminPackagesAddPage() {
         isCustom: true,
       }));
     return [...BASE_PACKAGE_OPTIONS, ...dynamic];
-  }, [customPackages]);
+  }, [BASE_PACKAGE_OPTIONS, customPackages]);
   const allPackageIds = useMemo(() => packageOptions.map((option) => option.id), [packageOptions]);
 
   const [pkg, setPkg] = useState<string>(BASE_PACKAGE_OPTIONS[0]?.id ?? "");
@@ -350,7 +352,6 @@ export default function AdminPackagesAddPage() {
             <Button
               type="submit"
               loading={adding}
-              disabled={adding || !pkg || packageOptions.length === 0}
               className="bg-sky-500 hover:bg-sky-600 text-white"
             >
               Add Accounts
