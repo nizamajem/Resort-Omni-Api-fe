@@ -56,6 +56,11 @@ const PAYMENT_CONFIRM_COPY: Record<PaymentOption, string> = {
 
 
 
+const isServerRentalId = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  return !value.startsWith('RUN-');
+};
+
 export default function DashboardPage() {
   const { role } = useAuth();
   const effectiveRole: PackageRole | 'superadmin' = role === 'superadmin' ? 'superadmin' : role === 'partnership' ? 'partnership' : 'resort';
@@ -627,6 +632,13 @@ export default function DashboardPage() {
   const handleConfirmPayment = async (method: PaymentOption, totalAmount: number) => {
     if (!payTarget) return;
     const target = payTarget;
+    if (!isServerRentalId(target.id)) {
+      setResultMsg('Unable to settle this rental because it never synced with the server. Please refresh and ensure the rental starts successfully before collecting payment.');
+      setPayConfirmOpen(false);
+      setPayTarget(null);
+      setSelectedPayment(null);
+      return;
+    }
     if (method === 'cash') {
       try {
         setPayBusy(true);
