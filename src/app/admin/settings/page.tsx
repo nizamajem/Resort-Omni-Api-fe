@@ -15,6 +15,7 @@ type CustomPackageConfig = {
   enabled?: boolean;
   description?: string | null;
   roles?: PackageRole[];
+  showPrice?: boolean;
 };
 
 type FeatureConfig = {
@@ -64,6 +65,7 @@ type CustomPackageDraft = {
   enabled: boolean;
   description: string;
   roles: Record<PackageRole, boolean>;
+  showPrice: boolean;
 };
 
 const createDefaultRoleSelection = (): Record<PackageRole, boolean> => ({ resort: true, partnership: true });
@@ -112,6 +114,7 @@ const toCustomDraft = (pkg: CustomPackageConfig, index: number): CustomPackageDr
   enabled: pkg.enabled !== false,
   description: pkg.description ? String(pkg.description) : '',
   roles: normalizeCustomRoles(pkg.roles),
+  showPrice: pkg.showPrice !== false,
 });
 const createEmptyCustomDraft = (): CustomPackageDraft => ({
   key: `new-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
@@ -122,6 +125,7 @@ const createEmptyCustomDraft = (): CustomPackageDraft => ({
   enabled: true,
   description: '',
   roles: normalizeCustomRoles(['resort', 'partnership']),
+  showPrice: true,
 });
 
 export default function AdminSettingsPage() {
@@ -363,6 +367,7 @@ const saveExtra = async (key: RentalExtraKey) => {
           pricePerBlock: Math.round(rate),
           enabled: draft.enabled,
           roles: selectedRoles,
+          showPrice: draft.showPrice,
         };
         const desc = draft.description.trim();
         if (desc) {
@@ -517,10 +522,17 @@ const saveExtra = async (key: RentalExtraKey) => {
                 const disabled = loading || customSaving;
                 const minutesPreview = Number(draft.blockMinutes);
                 const pricePreview = Number(draft.pricePerBlock);
-                const previewLabel =
+                const blockPreviewLabel =
                   Number.isFinite(minutesPreview) && minutesPreview > 0 && Number.isFinite(pricePreview) && pricePreview > 0
                     ? `${formatIDR(pricePreview)} per ${minutesPreview} minute block`
                     : 'Set block duration and price to see the preview';
+                const visibilityLabel = draft.showPrice
+                  ? 'Price is visible on the resort dashboard.'
+                  : 'Price is hidden; staff can explain it during order.';
+                const visibilityBadgeClass = draft.showPrice
+                  ? 'inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200'
+                  : 'inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200';
+                const visibilityDotClass = draft.showPrice ? 'bg-emerald-500' : 'bg-amber-500';
                 return (
                   <div key={draft.key} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -538,6 +550,21 @@ const saveExtra = async (key: RentalExtraKey) => {
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-medium text-slate-600">Enabled</span>
                         <Switch checked={draft.enabled} disabled={disabled} onChange={(next) => updateCustomDraft(draft.key, { enabled: next })} />
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pricing visibility</div>
+                            <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                              Turn this off to hide the price on the resort dashboard while still tracking it internally.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={draft.showPrice}
+                            disabled={disabled}
+                            onChange={(next) => updateCustomDraft(draft.key, { showPrice: next })}
+                          />
+                        </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-700">
                         <span className="font-medium text-slate-600">Available for</span>
@@ -607,7 +634,13 @@ const saveExtra = async (key: RentalExtraKey) => {
                       />
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="text-xs text-slate-500">{previewLabel}</div>
+                      <div className="space-y-1 text-xs text-slate-500">
+                        <div>{blockPreviewLabel}</div>
+                        <span className={visibilityBadgeClass}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${visibilityDotClass}`} aria-hidden />
+                          {visibilityLabel}
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => removeCustomDraft(draft.key)}

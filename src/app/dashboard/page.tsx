@@ -7,7 +7,16 @@ import { useAuth } from "@/app/auth.context";
 
 type BasePackageId = "1h" | "3h" | "12h" | "1d";
 type BasePackage = { id: BasePackageId; title: string; desc: string; price: number; unit: string };
-type CustomPackageConfig = { id: string; name: string; blockMinutes: number; pricePerBlock: number; enabled?: boolean; description?: string | null; roles?: PackageRole[] };
+type CustomPackageConfig = {
+  id: string;
+  name: string;
+  blockMinutes: number;
+  pricePerBlock: number;
+  enabled?: boolean;
+  description?: string | null;
+  roles?: PackageRole[];
+  showPrice?: boolean;
+};
 type OrderablePackage = {
   key: string;
   kind: "standard" | "custom";
@@ -22,6 +31,7 @@ type OrderablePackage = {
   blockMinutes?: number;
   customConfigId?: string;
   customMeta?: CustomPackageConfig;
+  showPrice: boolean;
 };
 type RentalExtrasConfig = { extraGraceMinutes: number; extraHourlyRate: number; extraBlockMinutes?: number };
 
@@ -124,6 +134,17 @@ export default function DashboardPage() {
     if (!allowed || allowed.length === 0) return true;
     return allowed.includes(effectiveRole as PackageRole);
   }, [features, effectiveRole]);
+
+  const isPriceVisible = useCallback(
+    (pkgId: string, isCustom: boolean) => {
+      if (!isCustom) return true;
+      if (!features?.customPackages) return true;
+      const match = features.customPackages.find((item) => item && item.id === pkgId);
+      if (!match) return true;
+      return match.showPrice !== false;
+    },
+    [features]
+  );
   const baseMinutesFor = (pkgId: BasePackageId) => (pkgId === "1h" ? 60 : pkgId === "3h" ? 180 : pkgId === "12h" ? 720 : 1440);
   const normalizeAvailability = (raw: any): AvailabilityState => {
     const counts: Record<string, number> = {};
@@ -179,6 +200,7 @@ export default function DashboardPage() {
           price: pkg.price,
           unit: pkg.unit,
           baseMinutes: baseMinutesFor(pkg.id),
+          showPrice: true,
         });
       });
     const customList = Array.isArray(features?.customPackages) ? features.customPackages.filter((item) => item && item.enabled !== false) : [];
@@ -199,6 +221,7 @@ export default function DashboardPage() {
       }
       const name = (item.name || '').trim() || 'Custom Package';
       const description = (item.description || '').trim() || `Charged every ${blockMinutes} minute${blockMinutes > 1 ? 's' : ''}.`;
+      const priceVisible = isPriceVisible(slug, true);
       next.push({
         key: `custom-${slug}-${blockMinutes}-${pricePerBlock}`,
         kind: "custom",
@@ -213,10 +236,11 @@ export default function DashboardPage() {
         blockMinutes,
         customConfigId: slug,
         customMeta: item,
+        showPrice: priceVisible,
       });
     });
     return next;
-  }, [basePackages, features, effectiveRole, isPackageEnabledForRole]);
+  }, [basePackages, features, effectiveRole, isPackageEnabledForRole, isPriceVisible]);
 
   const cashEnabled = features ? !!features.payments.cash : true;
   const sandboxEnabled = features ? !!features.payments.midtransSandbox : true;
@@ -612,6 +636,13 @@ export default function DashboardPage() {
 
   // Online payment is now only triggered from Pay Now on unpaid rows
 
+  const HiddenPriceBadge = ({ text = 'Price hidden' }: { text?: string }) => (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+      {text}
+    </span>
+  );
+
   // Pay button for unpaid rentals
   function PayUnpaidBtn({ rental, onOpen }: { rental: any; onOpen: (r: any) => void }) {
     if (!hasAnyPayment) {
@@ -750,10 +781,17 @@ export default function DashboardPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 19.5l3-9h4.5m0 0L18 6h-3m1.5 4.5 3 3" /></svg>
                 </div>
               </div>
-              <div className="mt-4 flex items-baseline gap-2">
-                <div className="text-2xl font-bold text-slate-900">{fmt(p.price)}</div>
-                <div className="text-sm text-slate-500">/ {p.unit}</div>
-              </div>
+              {p.showPrice ? (
+                <div className="mt-4 flex items-baseline gap-2">
+                  <div className="text-2xl font-bold text-slate-900">{fmt(p.price)}</div>
+                  <div className="text-sm text-slate-500">/ {p.unit}</div>
+                </div>
+              ) : (
+                <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs font-semibold text-amber-800">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+                  This Package is only for room bundling.
+                </div>
+              )}
               {p.kind === 'custom' ? (
                 <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-200">
                   <span className="h-1.5 w-1.5 rounded-full bg-violet-500" /> tiered billing per block
@@ -798,9 +836,11 @@ export default function DashboardPage() {
               <div className="text-sm font-semibold text-slate-800">Package details</div>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
                 <li>
-                  {detailFor.kind === 'custom'
-                    ? `${fmt(detailFor.price)} per ${detailFor.blockMinutes ?? detailFor.baseMinutes} minute block`
-                    : `${fmt(detailFor.price)} package price including ${detailFor.baseMinutes} minutes of ride time`
+                  {detailFor.showPrice
+                    ? detailFor.kind === 'custom'
+                      ? `${fmt(detailFor.price)} per ${detailFor.blockMinutes ?? detailFor.baseMinutes} minute block`
+                      : `${fmt(detailFor.price)} package price including ${detailFor.baseMinutes} minutes of ride time`
+                    : 'Price is hidden on the resort dashboard and will be confirmed privately by the admin team.'
                   }
                 </li>
                 <li>
@@ -834,7 +874,15 @@ export default function DashboardPage() {
             </div>
 
 
-            <div className="mt-4 text-slate-700">Price: <span className="font-semibold">{fmt(detailFor.price)}</span> / {detailFor.unit}</div>
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              {detailFor.showPrice ? (
+                <span>
+                  Price: <span className="font-semibold text-slate-900">{fmt(detailFor.price)}</span> / {detailFor.unit}
+                </span>
+              ) : (
+                <span className="font-semibold text-amber-700">Price hidden - coordinator will inform the rate during checkout.</span>
+              )}
+            </div>
             <div className="mt-6 flex gap-3">
               <button onClick={() => setDetailFor(null)} className="h-11 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">Close</button>
               <button onClick={() => { setDetailFor(null); onOrder(detailFor); }} className="h-11 flex-1 rounded-xl bg-sky-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700">Order</button>
@@ -881,7 +929,12 @@ export default function DashboardPage() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmCashOpen(false)} />
           <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
             <h3 className="text-lg font-semibold text-slate-900">Start Rental</h3>
-            <p className="mt-2 text-sm text-slate-600">Please confirm to start rental for {orderFor.title} ({fmt(orderFor.price)}).</p>
+            <p className="mt-2 text-sm text-slate-600">
+              {orderFor.showPrice
+                ? `Please confirm to start rental for ${orderFor.title} (${fmt(orderFor.price)}).`
+                : `Please confirm to start rental for ${orderFor.title}. The price will be recorded internally by the admin team.`
+              }
+            </p>
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-slate-200">
               Guest: <span className="font-medium text-slate-900">{guestName || "-"}</span> {guestSecondarySummaryLabel}: <span className="font-medium text-slate-900">{roomNumber || "-"}</span>
             </div>
@@ -971,12 +1024,14 @@ export default function DashboardPage() {
                     charge = r.status === 'active' ? r.basePrice + extraCost : (r.amountDue ?? (r.basePrice + extraCost));
                   }
                   const hours = Math.floor(elapsedSec / 3600);
-                  const minutes = Math.floor((elapsedSec % 3600) / 60);
-                  const seconds = elapsedSec % 60;
-                  const startedStr = new Date(r.startedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-                  const rowClass = r.status === 'unpaid' ? 'bg-rose-50' : '';
-                  return (
-                    <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
+                const minutes = Math.floor((elapsedSec % 3600) / 60);
+                const seconds = elapsedSec % 60;
+                const startedStr = new Date(r.startedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+                const rowClass = r.status === 'unpaid' ? 'bg-rose-50' : '';
+                const isCustomRental = isTiered || Boolean(r.customPackageId);
+                const priceVisible = isPriceVisible(r.customPackageId || r.pkg, isCustomRental);
+                return (
+                  <tr key={r.id} className={`border-t border-slate-100 ${rowClass}`}>
                       <td className="px-3 py-2 text-slate-800">{r.resortName || '-'}</td>
                       <td className="px-3 py-2 text-slate-800">{r.guestName}</td>
                       <td className="px-3 py-2 text-slate-800">{r.roomNumber}</td>
@@ -984,7 +1039,9 @@ export default function DashboardPage() {
                       <td className="px-3 py-2 text-slate-800">{r.packageName}</td>
                       <td className="px-3 py-2 text-slate-700">{startedStr}</td>
                       <td className="px-3 py-2 text-slate-700">{String(hours).padStart(2, '0')}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}</td>
-                      <td className="px-3 py-2 font-semibold text-slate-900">{fmt(charge)}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">
+                        {priceVisible ? fmt(charge) : <HiddenPriceBadge />}
+                      </td>
                       <td className="px-3 py-2">
                         {r.status === 'active' ? (
                           <button
@@ -1107,6 +1164,7 @@ export default function DashboardPage() {
               const ss = String(durationSec % 60).padStart(2, '0');
               const durationMin = Math.max(0, Math.ceil((end - start) / 60000));
               const isTiered = payTarget.billingMode === 'tiered';
+              const priceVisible = isPriceVisible(payTarget.customPackageId || payTarget.pkg, isTiered || Boolean(payTarget.customPackageId));
               let total = payTarget.amountDue ?? payTarget.basePrice;
               let extraDisplay: JSX.Element | null = null;
               const breakdownRows: { label: string; value: string }[] = [];
@@ -1182,14 +1240,23 @@ export default function DashboardPage() {
                       {breakdownRows.map((row) => (
                         <div key={row.label} className="flex items-center justify-between">
                           <span className="text-slate-600">{row.label}</span>
-                          <span className="font-medium text-slate-900">{row.value}</span>
+                          <span className="font-medium text-slate-900">
+                            {priceVisible ? row.value : <HiddenPriceBadge />}
+                          </span>
                         </div>
                       ))}
                       <div className="my-2 h-px bg-slate-200" />
                       <div className="flex items-center justify-between text-base">
                         <span className="font-semibold text-slate-900">Total</span>
-                        <span className="font-semibold text-slate-900">{fmt(total)}</span>
+                        <span className="font-semibold text-slate-900">
+                          {priceVisible ? fmt(total) : <HiddenPriceBadge text="Ask admin" />}
+                        </span>
                       </div>
+                      {!priceVisible && (
+                        <p className="pt-2 text-xs text-amber-700">
+                          Pricing for this custom package is hidden. Please coordinate with the admin team to confirm the total.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="mt-5">

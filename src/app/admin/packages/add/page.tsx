@@ -8,8 +8,24 @@ import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 
 type PackageAccount = { id: string; pkg: string; email: string; password: string; status: "active" | "sold"; createdAt?: string };
-type PackageOption = { id: string; label: string; description: string; isCustom: boolean };
-type CustomPackageMeta = { id: string; name: string; blockMinutes: number; pricePerBlock: number; description?: string | null; enabled?: boolean };
+type PackageOption = {
+  id: string;
+  label: string;
+  description: string;
+  isCustom: boolean;
+  blockMinutes?: number;
+  pricePerBlock?: number;
+  showPrice?: boolean;
+};
+type CustomPackageMeta = {
+  id: string;
+  name: string;
+  blockMinutes: number;
+  pricePerBlock: number;
+  description?: string | null;
+  enabled?: boolean;
+  showPrice?: boolean;
+};
 const BASE_PACKAGE_OPTIONS: PackageOption[] = [
   { id: "1h", label: "1 Hour", description: "Short ride package.", isCustom: false },
   { id: "3h", label: "3 Hours", description: "Medium ride package.", isCustom: false },
@@ -22,6 +38,12 @@ const API_BASE = (() => {
   if (env && env.trim().length > 0) return `${env.replace(/\/$/, "")}/api`;
   return "http://localhost:4000/api";
 })();
+
+const IDR = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+const formatIDR = (value: number) => {
+  if (!Number.isFinite(value)) return "-";
+  return IDR.format(Math.max(0, Math.round(value)));
+};
 
 export default function AdminPackagesAddPage() {
   const [token, setToken] = useState<string | null>(null);
@@ -39,6 +61,9 @@ export default function AdminPackagesAddPage() {
         label: item.name || item.id,
         description: item.description || `Custom package (${item.blockMinutes} minute block)`,
         isCustom: true,
+        blockMinutes: item.blockMinutes,
+        pricePerBlock: item.pricePerBlock,
+        showPrice: item.showPrice !== false,
       }));
     return [...BASE_PACKAGE_OPTIONS, ...dynamic];
   }, [customPackages]);
@@ -78,6 +103,7 @@ export default function AdminPackagesAddPage() {
                 pricePerBlock: Number(item.pricePerBlock ?? 0),
                 description: typeof item.description === "string" ? item.description : null,
                 enabled: item.enabled !== false,
+                showPrice: item.showPrice !== false,
               }))
           : [];
         setCustomPackages(list);
@@ -298,24 +324,53 @@ export default function AdminPackagesAddPage() {
           ) : (
             packageOptions.map((option) => {
               const active = counts[option.id] ?? 0;
+              const selected = pkg === option.id;
+              const showCustomPrice = option.isCustom && option.showPrice !== false && Number(option.pricePerBlock) > 0;
               return (
-                <div
+                <button
+                  type="button"
                   key={option.id}
-                  className={`rounded-xl border p-4 ring-1 ring-slate-200 ${pkg === option.id ? "bg-sky-50 border-sky-200" : "bg-white"}`}
+                  onClick={() => setPkg(option.id)}
+                  aria-pressed={selected}
+                  className={`w-full rounded-xl border p-4 text-left ring-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${
+                    selected ? "border-sky-300 bg-sky-50/80 ring-sky-200" : "border-slate-200 bg-white hover:-translate-y-0.5"
+                  }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-slate-900">{option.label}</div>
-                    <span className="text-xs text-slate-500">
-                      Active: <span className="font-semibold text-slate-900">{active}</span>
-                    </span>
-                  </div>
-                  <div className="mt-2 text-xs text-slate-600">{option.description}</div>
-                  {option.isCustom && (
-                    <div className="mt-3 inline-flex items-center rounded-full bg-violet-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
-                      Custom
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{option.label}</div>
+                      <div className="mt-1 text-xs text-slate-600">{option.description}</div>
                     </div>
-                  )}
-                </div>
+                    <div className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                      Active <span className="text-slate-900">{active}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {option.isCustom && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700 ring-1 ring-violet-200">
+                        <span className="h-1.5 w-1.5 rounded-full bg-violet-500" aria-hidden />
+                        Custom
+                      </span>
+                    )}
+                    {option.isCustom && showCustomPrice && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-slate-800 ring-1 ring-slate-200">
+                        {formatIDR(Number(option.pricePerBlock))} / {option.blockMinutes ?? 1} min
+                      </span>
+                    )}
+                    {option.isCustom && !showCustomPrice && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+                        Price hidden
+                      </span>
+                    )}
+                    {selected && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-sky-100/70 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                        <span className="h-1.5 w-1.5 rounded-full bg-sky-500" aria-hidden />
+                        Selected
+                      </span>
+                    )}
+                  </div>
+                </button>
               );
             })
           )}
